@@ -203,11 +203,60 @@ class MSMConfig(BaseModel):
         return value
 
 
+class ExecutionConfig(BaseModel):
+    """Where and how walker MD jobs are dispatched.
+
+    ``backend: local`` (default) runs walkers as local subprocesses across CPU
+    or GPU slots (multi-GPU workstation). ``slurm`` / ``pbs`` submit each
+    iteration's walkers as a scheduler array job for CPU-only or GPU HPC
+    clusters. Scheduler fields are ignored by the local backend.
+    """
+
+    backend: str = "local"  # "local" | "slurm" | "pbs"
+    # Scheduler resource requests (per array task = one walker).
+    partition: Optional[str] = None  # SLURM partition / PBS queue
+    account: Optional[str] = None
+    walltime: str = "01:00:00"
+    cpus_per_task: int = 1
+    gpus_per_task: int = 0
+    memory: Optional[str] = None  # e.g. "8G"
+    # Robustness / polling.
+    max_retries: int = 1  # resubmit failed walkers up to this many times
+    poll_interval: float = 30.0  # seconds between scheduler polls
+    submit_timeout: float = 60.0  # seconds for a submit/poll command
+    module_loads: List[str] = []  # `module load ...` lines for job scripts
+    extra_directives: List[str] = []  # raw #SBATCH / #PBS lines
+    job_name: str = "autosampler"
+
+    @field_validator("backend")
+    @classmethod
+    def _backend(cls, value: str) -> str:
+        value = value.lower()
+        if value not in {"local", "slurm", "pbs"}:
+            raise ValueError("execution.backend must be 'local', 'slurm', or 'pbs'")
+        return value
+
+    @field_validator("cpus_per_task", "max_retries")
+    @classmethod
+    def _non_negative_int(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("must be >= 0")
+        return value
+
+    @field_validator("poll_interval", "submit_timeout")
+    @classmethod
+    def _positive_float(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("must be > 0")
+        return value
+
+
 class AutoSamplerConfig(BaseModel):
     system: SystemConfig
     engine: EngineConfig
     spawning: SpawningConfig
     msm: MSMConfig = Field(default_factory=MSMConfig)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     space_mode: str = "fixed"
     n_bins: List[int] = [30, 30]
     min_values: Optional[List[float]] = None

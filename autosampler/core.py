@@ -258,6 +258,7 @@ class AutoSamplerCore:
             iteration=self.iteration,
             max_workers=self.config.spawning.max_workers,
             gpu_ids=self.config.engine.gpu_ids,
+            execution=getattr(self.config, "execution", None),
         )
 
         runner_time = time.time() - runner_start_time
