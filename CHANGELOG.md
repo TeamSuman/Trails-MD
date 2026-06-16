@@ -32,6 +32,15 @@ adds first-class **HPC scalability** and **VAMP-2 feature optimisation**.
 - Per-iteration MSM results are written to the run directory and checkpointed
   for resume.
 
+#### MSM analysis & plotting
+- `autosampler/analysis/` — matplotlib-free data utilities (`load_msm_series`,
+  `load_latest_msm`, `load_cv_points`, free energies, free-energy surface) plus
+  `plots` (implied timescales, VAMP-2 / timescale convergence, free-energy
+  surface, metastable free energies, MSM network) and a one-command
+  `autosampler-analyze` CLI producing a multi-panel convergence report.
+- `msm.npz` now also stores the implied-timescale sweep and metastable
+  populations for plotting.
+
 #### Extensible ML collective variables (Phase 1)
 - `autosampler/spaces/registry.py` — single source of truth for CV methods,
   their backends, and availability. Adds **VAMPNet** and **SPIB** (State

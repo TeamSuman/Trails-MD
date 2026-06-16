@@ -963,17 +963,27 @@ class AutoSamplerCore:
     def _save_msm_result(self, iteration: int, result: Any) -> None:
         try:
             vamp2 = np.nan if result.vamp2_score is None else result.vamp2_score
-            np.savez_compressed(
-                self.outdir / f"iter_{iteration}" / "msm.npz",
-                lagtime=np.asarray(result.lagtime),
-                timescales=np.asarray(result.timescales, dtype=float),
-                stationary_distribution=np.asarray(
+            arrays = {
+                "lagtime": np.asarray(result.lagtime),
+                "timescales": np.asarray(result.timescales, dtype=float),
+                "stationary_distribution": np.asarray(
                     result.stationary_distribution, dtype=float
                 ),
-                transition_matrix=np.asarray(result.transition_matrix, dtype=float),
-                cluster_centers=np.asarray(result.cluster_centers, dtype=float),
-                vamp2_score=np.asarray([vamp2], dtype=float),
-            )
+                "transition_matrix": np.asarray(
+                    result.transition_matrix, dtype=float
+                ),
+                "cluster_centers": np.asarray(result.cluster_centers, dtype=float),
+                "vamp2_score": np.asarray([vamp2], dtype=float),
+            }
+            if getattr(result, "metastable_populations", None) is not None:
+                arrays["metastable_populations"] = np.asarray(
+                    result.metastable_populations, dtype=float
+                )
+            its = getattr(result, "its", None)
+            if its is not None:
+                arrays["its_lagtimes"] = np.asarray(its.lagtimes, dtype=float)
+                arrays["its_timescales"] = np.asarray(its.timescales, dtype=float)
+            np.savez_compressed(self.outdir / f"iter_{iteration}" / "msm.npz", **arrays)
         except Exception as exc:  # noqa: BLE001
             logging.debug("Failed to save msm.npz for iteration %d: %s", iteration, exc)
 

@@ -52,6 +52,9 @@ autosampler --config examples/AIB9/config_msm_vampnet.yaml --resume 12 --iterati
 # Per-iteration coverage / timing log
 autosampler-log --run-dir runs/adaptive_msm_vampnet
 
+# MSM analysis report (VAMP-2 / timescales / free energy / network)
+autosampler-analyze --run-dir runs/adaptive_msm_vampnet
+
 # Reconstruct a connected path between two CV points
 autosampler-path \
   --run-dir runs/alad_phi_psi_density \
