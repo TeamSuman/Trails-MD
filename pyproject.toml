@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autosampler"
+version = "2.0.0"
+description = "Adaptive collective-variable sampling framework for molecular dynamics."
+requires-python = ">=3.10"
+authors = [
+  { name = "AutoSampler contributors" }
+]
+dependencies = [
+  "numpy>=1.23",
+  "scipy>=1.9",
+  "shapely>=2.0",
+  "pydantic>=1.10",
+  "pyyaml>=6.0",
+  "scikit-learn>=1.2",
+  "MDAnalysis>=2.5",
+  "openmm>=8.0",
+  "torch>=2.0",
+  "deeptime>=0.4",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.optional-dependencies]
+deep-tica = [
+  "lightning>=2.0",
+  "mlcolvar>=1.0",
+]
+examples = [
+  "matplotlib>=3.7",
+]
+test = [
+  "pytest>=7.0",
+]
+all = [
+  "autosampler[deep-tica,examples,test]",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["autosampler*"]
+exclude = ["examples*", "tests*", "latex*"]
+
+[tool.setuptools]
+include-package-data = false
+
+[project.scripts]
+autosampler = "autosampler.cli:main"
+autosampler-run = "autosampler.cli:main"
+autosampler-path = "autosampler.path_cli:main"
+autosampler-log = "autosampler.log_cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

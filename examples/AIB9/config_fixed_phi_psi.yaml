@@ -1,0 +1,44 @@
+system:
+  conf_file: aib9_equilibrated.pdb
+  top_file: aib9_equilibrated.pdb
+  topology: charmm
+  system_file: system.py
+  project_file: project_phi_psi.py
+  trajectory_topology_file: aib9_equilibrated.pdb
+  feature_selection: "resname AIB"
+
+engine:
+  md_engine: openmm
+  platform_name: CUDA
+  precision: mixed
+  npt: true
+  equilibrate: false
+  temperature: 400.0
+  pressure: 1.0
+  dt: 0.001
+
+spawning:
+  spawn_scheme: density
+  spawn_type: hard
+  search_mode: explore
+  walker: 10
+  step: 5000
+  stride: 50
+  max_workers: 1
+  recent_density_window: 3
+  resolution_check_patience: 2
+  lof_neighbors: 5
+  voronoi_clusters: 12
+  voronoi_periodic: false
+  voronoi_grid_size: 80
+
+space_mode: fixed
+n_bins: [36, 36]
+min_values: [-3.141592653589793, -3.141592653589793]
+max_values: [3.141592653589793, 3.141592653589793]
+outdir: runs/fixed_phi_psi_residue5
+random_seed: 7
+checkpoint_freq: 0
+save_features: false
+retrain_freq: 0
+aggregate_memory: false
