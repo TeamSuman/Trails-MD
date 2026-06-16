@@ -59,6 +59,7 @@ Create or activate an environment with the scientific MD stack available. The
 project metadata is in `pyproject.toml`.
 
 ```bash
+conda create -n autosampler python=3.10
 conda activate autosampler
 python -m pip install -e ".[test]"
 ```
