@@ -3,11 +3,27 @@
 AutoSampler is a Python framework for adaptive molecular dynamics campaigns.
 It runs many short MD walkers, projects saved frames into a collective-variable
 or learned latent space, chooses informative restart frames, and repeats the
-cycle with checkpointed provenance.
+cycle — continuing until a **Markov State Model (MSM)** built on the sampled
+data has **converged**.
 
 The code is meant for method development and practical sampling workflows where
 you need to change engines, CVs, spawning policies, or analysis criteria without
 rewriting the whole pipeline.
+
+## What's new
+
+- **MSM-convergence engine** — build an MSM each iteration (deeptime) and stop
+  automatically on implied-timescale / VAMP-2 / statistical-error convergence
+  (`spawn_scheme: msm`, `msm.enabled`).
+- **More learned CVs** — VAMPNet and SPIB alongside TICA / TVAE / PCA / deep-TICA.
+- **VAMP-2 feature selection** — optionally select and adaptively update the
+  input features that best resolve the slow dynamics (`feature_selection.enabled`).
+- **HPC scalability** — run on a multi-GPU workstation or dispatch walkers as
+  **SLURM** / **PBS** array jobs (`execution.backend`).
+
+See **[`docs/`](docs/index.md)** (full documentation & tutorials) and
+**[`CHANGELOG.md`](CHANGELOG.md)**. Build the docs site with
+`pip install mkdocs-material && mkdocs serve`.
 
 ## Motivation
 

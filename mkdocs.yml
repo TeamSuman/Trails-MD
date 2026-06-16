@@ -1,0 +1,29 @@
+site_name: AutoSampler
+site_description: Autonomous adaptive MD sampling driven to MSM convergence
+repo_url: https://github.com/TeamSuman/AutoSampler
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts: concepts.md
+  - Configuration reference: configuration.md
+  - Collective variables: cv_methods.md
+  - Feature selection (VAMP-2): feature_selection.md
+  - MSM & convergence: msm.md
+  - Execution (workstation & HPC): execution.md
+  - Tutorial — adaptive MSM: tutorials/adaptive_msm.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - pymdownx.details
+  - toc:
+      permalink: true

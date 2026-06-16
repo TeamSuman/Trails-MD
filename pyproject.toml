@@ -45,9 +45,13 @@ examples = [
 ]
 test = [
   "pytest>=7.0",
+  "ruff>=0.6",
+]
+docs = [
+  "mkdocs-material>=9.0",
 ]
 all = [
-  "autosampler[deep-tica,examples,test]",
+  "autosampler[deep-tica,examples,test,docs]",
 ]
 
 [tool.setuptools.packages.find]

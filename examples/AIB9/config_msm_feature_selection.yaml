@@ -1,0 +1,98 @@
+# Adaptive MSM sampling with VAMP-2 feature selection, ready for HPC.
+#
+# Extends config_msm_vampnet.yaml with:
+#   * feature_selection: VAMP-2 optimisation of the input features (opt-in), and
+#   * execution: SLURM array-job dispatch (switch backend to `local` or `pbs`).
+# See docs/feature_selection.md and docs/execution.md.
+
+system:
+  conf_file: aib9_equilibrated.pdb
+  top_file: aib9_equilibrated.pdb
+  topology: charmm
+  system_file: system.py
+  trajectory_topology_file: aib9_equilibrated.pdb
+  feature_selection: "resname AIB and name N CA C O CB1 CB2"
+
+engine:
+  md_engine: openmm
+  platform_name: CUDA
+  precision: mixed
+  npt: true
+  temperature: 400.0
+  dt: 0.002
+
+spawning:
+  spawn_scheme: msm
+  spawn_type: probabilistic
+  search_mode: explore
+  walker: 16
+  step: 5000
+  stride: 50
+  max_workers: 4
+  voronoi_clusters: 100
+
+space_mode: vampnet
+adaptive_feature_type: distances
+aggregate_memory: true
+max_adaptive_memory_frames: 5000
+retrain_freq: 5
+
+adaptive_model:
+  lagtime: 5
+  latent_dim: 2
+  epochs: 50
+  encoder_hidden_dims: [64, 32]
+
+# VAMP-2 input-feature selection: keep and adaptively update the feature
+# columns that best resolve the slow dynamics.
+feature_selection:
+  enabled: true
+  method: greedy_vamp
+  lagtime: 10
+  cadence: 5            # re-select every 5 iterations
+  max_features: 50
+  min_gain: 1.0e-4
+
+msm:
+  enabled: true
+  cadence: 1
+  min_frames: 2000
+  lagtime: 10
+  lagtimes: [1, 2, 5, 10, 20]
+  n_microstates: 100
+  cluster_method: kmeans
+  estimator: bayesian
+  n_bayesian_samples: 50
+  n_timescales: 3
+  n_metastable: 4
+  convergence_mode: all
+  convergence_patience: 3
+  convergence_criteria:
+    - name: implied_timescales
+      params: {tol: 0.1, n_timescales: 2}
+    - name: vamp2
+      params: {tol: 0.05}
+    - name: statistical_error
+      params: {tol: 0.2}
+
+# Dispatch walkers as SLURM array jobs (one array job per iteration).
+# Switch backend to `local` for a workstation or `pbs` for PBS/Torque.
+execution:
+  backend: slurm
+  partition: gpu
+  account: my_alloc
+  walltime: "02:00:00"
+  cpus_per_task: 8
+  gpus_per_task: 1
+  memory: "16G"
+  max_retries: 2
+  poll_interval: 30
+  module_loads:
+    - "module load cuda/12.2"
+    # - "source $(conda info --base)/etc/profile.d/conda.sh && conda activate autosampler"
+
+outdir: runs/adaptive_msm_feature_selection
+random_seed: 7
+checkpoint_freq: 1
+save_features: true
+n_bins: [30, 30]
