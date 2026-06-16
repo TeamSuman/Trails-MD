@@ -24,6 +24,9 @@ adds first-class **HPC scalability** and **VAMP-2 feature optimisation**.
     statistical-error thresholds (combined with `all` / `any` + patience).
 - `MSMSpawner` (`spawn_scheme: msm`) — least-counts / MSM-uncertainty restart
   seeding that drives the MSM toward convergence on its slow processes.
+- **Weighted-ensemble resampling** — a real `WeightedEnsemble` split/merge core
+  (Huber & Kim, weight-conserving) and `WESpawner` (`spawn_scheme: we`,
+  `we_target_per_bin`), replacing the former placeholder.
 - `MSMConfig` — all MSM behaviour is **opt-in** (`msm.enabled: false` by
   default), so existing configs are unaffected.
 - Per-iteration MSM results are written to the run directory and checkpointed

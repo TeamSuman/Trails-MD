@@ -37,7 +37,8 @@ at startup. Below, only non-obvious defaults are noted — see
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `spawn_scheme` | `density` | `density` \| `voronoi` \| `lof` \| `fps` \| `msm`. |
+| `spawn_scheme` | `density` | `density` \| `voronoi` \| `lof` \| `fps` \| `msm` \| `we`. |
+| `we_target_per_bin` | `4` | Weighted-ensemble walkers per occupied bin (`spawn_scheme: we`). |
 | `spawn_type` | `hard` | `hard` or `probabilistic`. |
 | `search_mode` | `explore` | `explore` or `target` (toward `target`). |
 | `walker` / `step` / `stride` | `10` / `10000` / `100` | Walkers per iteration / MD steps / save interval. |

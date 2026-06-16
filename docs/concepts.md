@@ -13,6 +13,7 @@ the next iteration's walkers from. Spawners:
 | `lof` | Restart from statistical outliers (local outlier factor). |
 | `fps` | Farthest-point sampling for maximal coverage. |
 | `msm` | **MSM least-counts**: restart from microstates with the largest statistical uncertainty (drives MSM convergence). |
+| `we` | **Weighted ensemble**: split/merge resampling with conserved statistical weights, keeping a target walker count per bin. |
 
 ## CV spaces
 

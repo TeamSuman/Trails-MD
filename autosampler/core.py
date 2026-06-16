@@ -76,6 +76,8 @@ class AutoSamplerCore:
             periodic=self.config.spawning.voronoi_periodic,
             grid_size=self.config.spawning.voronoi_grid_size,
             n_neighbors=self.config.spawning.lof_neighbors,
+            target_per_bin=self.config.spawning.we_target_per_bin,
+            seed=self.config.random_seed,
         )
 
         # State variables

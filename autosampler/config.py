@@ -77,6 +77,7 @@ class SpawningConfig(BaseModel):
     voronoi_periodic: bool = False
     voronoi_grid_size: int = 250
     lof_neighbors: int = 20
+    we_target_per_bin: int = 4  # weighted-ensemble walkers per occupied bin
     resolution_check_patience: int = 5
     resolution_max_bins: int = 150
     voronoi_max_clusters: int = 5000
