@@ -91,6 +91,9 @@ class AdaptiveModelConfig(BaseModel):
     decoder_hidden_dims: List[int] = [128, 256]
     dropout_rate: float = 0.1
     deep_tica_hidden_dims: List[int] = [256, 128]
+    # SPIB (State Predictive Information Bottleneck) hyperparameters.
+    spib_n_states: int = 10
+    spib_beta: float = 1e-3
 
     @validator("lagtime", "latent_dim", "epochs")
     def validate_positive_int(cls, value: int) -> int:
@@ -129,10 +132,71 @@ class AdaptiveModelConfig(BaseModel):
         return value
 
 
+class MSMConfig(BaseModel):
+    """Configuration for Markov State Model estimation and MSM-based convergence.
+
+    All MSM behaviour is opt-in: with ``enabled=False`` (the default) the
+    adaptive loop keeps its legacy bin-occupancy convergence and no MSM is built,
+    so existing configs and examples are unaffected.
+    """
+
+    enabled: bool = False
+    # How often (in iterations) to (re)estimate the MSM. 1 = every iteration.
+    cadence: int = 1
+    # Minimum cumulative frames before the first MSM is attempted.
+    min_frames: int = 1000
+    lagtime: int = 10
+    # Optional lag-time ladder for an implied-timescale sweep (diagnostics).
+    lagtimes: Optional[List[int]] = None
+    n_microstates: int = 100
+    cluster_method: str = "kmeans"  # "kmeans" | "regspace"
+    estimator: str = "mle"  # "mle" | "bayesian"
+    n_bayesian_samples: int = 50
+    n_timescales: int = 3
+    n_metastable: Optional[int] = None
+    # Convergence: list of {name, params} criteria combined with all/any.
+    convergence_criteria: List[Dict[str, Any]] = Field(
+        default_factory=lambda: [
+            {"name": "implied_timescales", "params": {"tol": 0.1, "n_timescales": 2}},
+            {"name": "vamp2", "params": {"tol": 0.05}},
+        ]
+    )
+    convergence_mode: str = "all"  # "all" | "any"
+    convergence_patience: int = 2
+
+    @validator("cadence", "lagtime", "n_microstates", "n_timescales")
+    def _positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("must be greater than 0")
+        return value
+
+    @validator("cluster_method")
+    def _cluster_method(cls, value: str) -> str:
+        value = value.lower()
+        if value not in {"kmeans", "regspace"}:
+            raise ValueError("cluster_method must be 'kmeans' or 'regspace'")
+        return value
+
+    @validator("estimator")
+    def _estimator(cls, value: str) -> str:
+        value = value.lower()
+        if value not in {"mle", "bayesian"}:
+            raise ValueError("estimator must be 'mle' or 'bayesian'")
+        return value
+
+    @validator("convergence_mode")
+    def _mode(cls, value: str) -> str:
+        value = value.lower()
+        if value not in {"all", "any"}:
+            raise ValueError("convergence_mode must be 'all' or 'any'")
+        return value
+
+
 class AutoSamplerConfig(BaseModel):
     system: SystemConfig
     engine: EngineConfig
     spawning: SpawningConfig
+    msm: MSMConfig = Field(default_factory=MSMConfig)
     space_mode: str = "fixed"
     n_bins: List[int] = [30, 30]
     min_values: Optional[List[float]] = None
@@ -146,6 +210,15 @@ class AutoSamplerConfig(BaseModel):
     max_adaptive_memory_frames: int = 50000
     adaptive_feature_type: str = "distances"
     adaptive_model: AdaptiveModelConfig = Field(default_factory=AdaptiveModelConfig)
+
+    @validator("space_mode")
+    def validate_space_mode(cls, value: str) -> str:
+        from autosampler.spaces.registry import FIXED_MODE, adaptive_modes
+
+        valid = (FIXED_MODE,) + adaptive_modes()
+        if value not in valid:
+            raise ValueError(f"space_mode must be one of {valid}; got {value!r}")
+        return value
 
     @root_validator(pre=True)
     def promote_spawning_n_bins(cls, values: Dict[str, Any]) -> Dict[str, Any]:

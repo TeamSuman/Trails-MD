@@ -205,9 +205,43 @@ AutoSampler currently supports:
 - `voronoi`: KMeans-backed Voronoi cells with exact clipped polygon areas.
 - `lof`: local-outlier-factor based frame selection.
 - `fps`: farthest-point sampling for geometric spread.
+- `msm`: MSM least-counts — restart from sparsely-sampled microstates to
+  directly reduce the statistical error of the Markov State Model.
 
 Voronoi note: `voronoi_clusters` controls the restart-selection partition.
 The regular `n_bins` grid is still used for run-log coverage diagnostics.
+
+## Collective-Variable (CV) Methods
+
+The sampling space is chosen with `space_mode`. Beyond fixed user CVs, several
+learned CV methods are available through a single registry
+(`autosampler/spaces/registry.py`), so new methods can be added in one place:
+
+| `space_mode` | Method | Backend | Notes |
+|--------------|--------|---------|-------|
+| `fixed`      | User CVs via a project file | — | e.g. AlaD `phi/psi` |
+| `pca`        | Principal component analysis | scikit-learn | linear baseline |
+| `tica`       | Time-lagged ICA | deeptime | linear, dynamics-aware |
+| `tvae`       | Time-lagged VAE | deeptime + torch | nonlinear bottleneck |
+| `vampnet`    | VAMPNet | deeptime + torch | trained with the VAMP-2 score |
+| `spib`       | State Predictive Information Bottleneck | built-in (torch) | Wang & Tiwary 2021 |
+| `deep-tica`  | Deep (nonlinear) TICA | mlcolvar (optional) | `pip install "autosampler[deep-tica]"` |
+| `deep-lda`   | Deep LDA (supervised) | mlcolvar (optional) | needs state labels |
+
+`vampnet` and `spib` work out of the box (only deeptime/torch). Optional methods
+raise a clear, actionable error if their backend is missing.
+
+## MSM-Based Convergence
+
+With `msm.enabled: true`, AutoSampler builds a Markov State Model over the CV
+space each iteration (clustering → transition counts → MLE/Bayesian MSM →
+implied timescales, VAMP-2 score, PCCA+ metastable states) and stops sampling
+once the MSM has **converged**. Convergence is decided by a composable
+`ConvergenceMonitor` with pluggable criteria — implied-timescale stability,
+VAMP-2 plateau, stationary-distribution drift, and Bayesian statistical error —
+combined with `all`/`any` and a patience window. Per-iteration results are
+written to `iter_*/msm.npz`. See `examples/AIB9/config_msm_vampnet.yaml` for a
+complete MSM-driven adaptive-sampling configuration.
 
 ## Typical Workflow
 

@@ -23,6 +23,7 @@ from autosampler.engines.amber import amber_trajectory_suffix
 from autosampler.engines.base import EngineFactory
 from autosampler.paths import build_frame_records, map_global_frame
 from autosampler.spaces import AdaptiveSpaceModel, FeatureExtractor
+from autosampler.spaces.registry import is_adaptive_space
 from autosampler.spawners.base import SpawnerFactory
 from autosampler.utils.seeds import SeedManager
 from autosampler.workflows.parallel import run_iteration_parallel
@@ -56,7 +57,7 @@ class AutoSamplerCore:
         }
         self.engine = EngineFactory.get(self.config.engine.md_engine, **_engine_kwargs)
 
-        is_adaptive = self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]
+        is_adaptive = is_adaptive_space(self.config.space_mode)
         # Initialize Spawner
         self.spawner = SpawnerFactory.get(
             self.config.spawning.spawn_scheme,
@@ -90,6 +91,27 @@ class AutoSamplerCore:
         self.convergence_stall_count = 0
         self.converged = False
         self.convergence_reason = None
+
+        # MSM subsystem (opt-in via config.msm.enabled).
+        self.msm_estimator = None
+        self.msm_monitor = None
+        self.last_msm_result = None
+        msm_cfg = getattr(self.config, "msm", None)
+        if msm_cfg is not None and msm_cfg.enabled:
+            from autosampler.msm import MSMEstimator, build_monitor_from_config
+
+            self.msm_estimator = MSMEstimator(
+                lagtime=msm_cfg.lagtime,
+                n_microstates=msm_cfg.n_microstates,
+                cluster_method=msm_cfg.cluster_method,
+                estimator=msm_cfg.estimator,
+                n_metastable=msm_cfg.n_metastable,
+                n_timescales=msm_cfg.n_timescales,
+                lagtimes=msm_cfg.lagtimes,
+                n_bayesian_samples=msm_cfg.n_bayesian_samples,
+                seed=self.config.random_seed,
+            )
+            self.msm_monitor = build_monitor_from_config(msm_cfg)
 
     def prepare(self):
         """Prepare the simulation system."""
@@ -135,12 +157,7 @@ class AutoSamplerCore:
     def restore_checkpoint(self, iteration: int):
         """Restore sampler state from a saved checkpoint and resume at the next iteration."""
         restored_model = self.space_model
-        if restored_model is None and self.config.space_mode in [
-            "tvae",
-            "tica",
-            "deep-tica",
-            "pca",
-        ]:
+        if restored_model is None and is_adaptive_space(self.config.space_mode):
             restored_model = AdaptiveSpaceModel(**self._adaptive_model_kwargs())
 
         (
@@ -284,7 +301,7 @@ class AutoSamplerCore:
             topology=trajectory_topology, selection=self.config.system.feature_selection
         )
 
-        if self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]:
+        if is_adaptive_space(self.config.space_mode):
             # Feature Extraction
             adaptive_feature_type = getattr(
                 self.config, "adaptive_feature_type", "distances"
@@ -385,7 +402,7 @@ class AutoSamplerCore:
 
         # Always extract physical CVs for evaluation/plotting if project_file is provided
         if (
-            self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]
+            is_adaptive_space(self.config.space_mode)
             and self.config.system.project_file
         ):
             try:
@@ -447,7 +464,7 @@ class AutoSamplerCore:
             "walker_parents": list(self.walker_parents),
             "next_walker_parents": next_walker_parents,
         }
-        if self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]:
+        if is_adaptive_space(self.config.space_mode):
             self.history[self.iteration]["features"] = features
             self.history[self.iteration]["space_version"] = self.adaptive_space_version
 
@@ -476,7 +493,7 @@ class AutoSamplerCore:
         try:
             from autosampler.binning.spatial import RegularBinner
 
-            is_adaptive = self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]
+            is_adaptive = is_adaptive_space(self.config.space_mode)
             binner = RegularBinner(
                 n_bins=self.config.n_bins,
                 min_values=None if is_adaptive else self.config.min_values,
@@ -505,6 +522,9 @@ class AutoSamplerCore:
         except Exception as e:
             bin_occupancy_str = "N/A"
             logging.debug(f"Failed to compute bin occupancy: {e}")
+
+        # MSM estimation + MSM-based convergence (opt-in).
+        self._maybe_build_msm()
 
         current_iteration = self.iteration - 1
         self._append_iteration_log(
@@ -647,7 +667,7 @@ class AutoSamplerCore:
 
     def _restore_feature_memory_from_history(self) -> None:
         """Rebuild adaptive feature memory from checkpointed history when possible."""
-        if self.config.space_mode not in ["tvae", "tica", "deep-tica", "pca"]:
+        if not is_adaptive_space(self.config.space_mode):
             return
 
         self.feature_memory = []
@@ -685,6 +705,9 @@ class AutoSamplerCore:
             "convergence_stall_count": self.convergence_stall_count,
             "converged": self.converged,
             "convergence_reason": self.convergence_reason,
+            "msm_monitor": self.msm_monitor.state_dict()
+            if self.msm_monitor is not None
+            else None,
         }
 
     def _restore_sampler_state(self, state: Dict[str, Any] | None) -> None:
@@ -702,6 +725,96 @@ class AutoSamplerCore:
         self.convergence_stall_count = int(state.get("convergence_stall_count", 0))
         self.converged = bool(state.get("converged", False))
         self.convergence_reason = state.get("convergence_reason")
+        if self.msm_monitor is not None and state.get("msm_monitor"):
+            self.msm_monitor.load_state_dict(state["msm_monitor"])
+
+    def _collect_msm_trajectories(self) -> List[Any]:
+        """Split cumulative history projections into continuous per-walker trajectories.
+
+        Each short walker is one continuous trajectory; transition counts are
+        pooled across all of them by the estimator. Single-frame segments are
+        dropped because they carry no transitions.
+        """
+        frames_per_walker = self.config.spawning.step // self.config.spawning.stride
+        trajs: List[Any] = []
+        for iteration in sorted(self.history):
+            entry = self.history[iteration]
+            if not isinstance(entry, dict):
+                continue
+            projection = entry.get("projection")
+            if projection is None:
+                continue
+            projection = np.asarray(projection, dtype=float)
+            if projection.ndim == 1:
+                projection = projection.reshape(-1, 1)
+            if frames_per_walker <= 0:
+                if len(projection) > 1:
+                    trajs.append(projection)
+                continue
+            n_walkers = int(np.ceil(len(projection) / frames_per_walker))
+            for walker in range(n_walkers):
+                segment = projection[
+                    walker * frames_per_walker : (walker + 1) * frames_per_walker
+                ]
+                if len(segment) > 1:
+                    trajs.append(segment)
+        return trajs
+
+    def _maybe_build_msm(self) -> None:
+        """Estimate the MSM for the just-completed iteration and update convergence."""
+        if self.msm_estimator is None or self.msm_monitor is None:
+            return
+
+        msm_cfg = self.config.msm
+        current_iteration = self.iteration - 1
+        if msm_cfg.cadence > 0 and current_iteration % msm_cfg.cadence != 0:
+            return
+
+        trajs = self._collect_msm_trajectories()
+        total_frames = sum(len(t) for t in trajs)
+        if total_frames < msm_cfg.min_frames:
+            logging.info(
+                "MSM skipped at iteration %d: %d cumulative frames < min_frames %d.",
+                current_iteration,
+                total_frames,
+                msm_cfg.min_frames,
+            )
+            return
+
+        try:
+            result = self.msm_estimator.fit(trajs, iteration=current_iteration)
+        except Exception as exc:  # noqa: BLE001 - MSM is diagnostic, never fatal
+            logging.warning(
+                "MSM estimation failed at iteration %d: %s", current_iteration, exc
+            )
+            return
+
+        self.last_msm_result = result
+        logging.info("Iteration %d %s", current_iteration, result.summary())
+        self._save_msm_result(current_iteration, result)
+
+        converged = self.msm_monitor.update(result)
+        logging.info("MSM convergence %s", self.msm_monitor.status_line())
+        if converged and not self.converged:
+            self.converged = True
+            self.convergence_reason = self.msm_monitor.reason
+
+    def _save_msm_result(self, iteration: int, result: Any) -> None:
+        try:
+            vamp2 = np.nan if result.vamp2_score is None else result.vamp2_score
+            np.savez_compressed(
+                self.outdir / f"iter_{iteration}" / "msm.npz",
+                lagtime=np.asarray(result.lagtime),
+                timescales=np.asarray(result.timescales, dtype=float),
+                stationary_distribution=np.asarray(
+                    result.stationary_distribution, dtype=float
+                ),
+                transition_matrix=np.asarray(result.transition_matrix, dtype=float),
+                cluster_centers=np.asarray(result.cluster_centers, dtype=float),
+                vamp2_score=np.asarray([vamp2], dtype=float),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logging.debug("Failed to save msm.npz for iteration %d: %s", iteration, exc)
 
     def _update_resolution_and_convergence(self, occupied_bins: int | None) -> None:
         if occupied_bins is None:

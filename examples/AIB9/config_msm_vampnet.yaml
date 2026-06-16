@@ -1,0 +1,76 @@
+# Adaptive sampling driven to MSM convergence.
+#
+# This example learns a VAMPNet collective variable on the fly, builds a Markov
+# State Model each iteration, spawns new walkers from under-sampled microstates
+# (MSM least-counts), and stops automatically once the MSM has converged
+# (implied timescales and VAMP-2 score plateau). Set `space_mode` to any of
+# `vampnet`, `spib`, `tvae`, `tica`, `deep-tica`, or `pca`.
+
+system:
+  conf_file: aib9_equilibrated.pdb
+  top_file: aib9_equilibrated.pdb
+  topology: charmm
+  system_file: system.py
+  trajectory_topology_file: aib9_equilibrated.pdb
+  feature_selection: "resname AIB and name N CA C O CB1 CB2"
+
+engine:
+  md_engine: openmm
+  platform_name: CUDA
+  precision: mixed
+  npt: true
+  temperature: 400.0
+  dt: 0.002
+
+spawning:
+  spawn_scheme: msm          # MSM least-counts: target microstate statistical error
+  spawn_type: probabilistic
+  search_mode: explore
+  walker: 10
+  step: 5000
+  stride: 50
+  max_workers: 1
+  voronoi_clusters: 100      # reused by the MSM spawner as the microstate count
+
+space_mode: vampnet          # cutting-edge ML CV (deeptime VAMPNet)
+adaptive_feature_type: distances
+aggregate_memory: true
+max_adaptive_memory_frames: 5000
+retrain_freq: 5              # retrain the CV every 5 iterations
+
+adaptive_model:
+  lagtime: 5
+  latent_dim: 2
+  epochs: 50
+  encoder_hidden_dims: [64, 32]
+  # SPIB-specific knobs (used when space_mode: spib)
+  spib_n_states: 10
+  spib_beta: 0.001
+
+msm:
+  enabled: true
+  cadence: 1                 # build the MSM every iteration
+  min_frames: 2000           # wait for enough data before the first MSM
+  lagtime: 10
+  lagtimes: [1, 2, 5, 10, 20]   # implied-timescale sweep (diagnostics)
+  n_microstates: 100
+  cluster_method: kmeans
+  estimator: bayesian        # posterior error bars on the slow timescales
+  n_bayesian_samples: 50
+  n_timescales: 3
+  n_metastable: 4            # PCCA+ coarse-graining
+  convergence_mode: all
+  convergence_patience: 3
+  convergence_criteria:
+    - name: implied_timescales
+      params: {tol: 0.1, n_timescales: 2}
+    - name: vamp2
+      params: {tol: 0.05}
+    - name: statistical_error
+      params: {tol: 0.2}
+
+outdir: runs/adaptive_msm_vampnet
+random_seed: 7
+checkpoint_freq: 1
+save_features: true
+n_bins: [30, 30]
