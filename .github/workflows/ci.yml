@@ -28,8 +28,11 @@ jobs:
           # Lightweight stack covering the MSM and CV-method tests. The heavy MD
           # backends (openmm, MDAnalysis) are not required: tests that need them
           # skip automatically via pytest.importorskip.
-          pip install numpy scipy scikit-learn pydantic pyyaml deeptime pytest
+          pip install numpy scipy scikit-learn pydantic pyyaml deeptime pytest ruff
           pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Lint (ruff)
+        run: ruff check autosampler/msm autosampler/spaces/registry.py autosampler/spaces/spib.py autosampler/spawners/msm.py autosampler/reporting.py autosampler/engines/base.py tests
 
       - name: Run test suite
         run: pytest -q

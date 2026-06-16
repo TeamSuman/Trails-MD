@@ -13,8 +13,6 @@ spawners, returning indices into the cumulative point cloud, so it is a drop-in
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 
 from .base import Spawner, SpawnerFactory
@@ -44,7 +42,7 @@ class MSMSpawner(Spawner):
         self,
         n_clusters: int = 150,
         mode: str = "explore",
-        target: Optional[list] = None,
+        target: list | None = None,
         weighting: str = "least_counts",
         seed: int = 42,
         **_,

@@ -4,6 +4,7 @@ from pathlib import Path
 import importlib.util
 import json
 import shutil
+import sys
 
 # Suppress common non-critical warnings from dependencies
 warnings.filterwarnings(
@@ -16,12 +17,12 @@ from typing import Any, Dict, List
 import numpy as np
 from pydantic import ValidationError
 
-from autosampler.binning.we import WEResampler
 from autosampler.checkpoints.manager import CheckpointManager
 from autosampler.config import AutoSamplerConfig
 from autosampler.engines.amber import amber_trajectory_suffix
 from autosampler.engines.base import EngineFactory
 from autosampler.paths import build_frame_records, map_global_frame
+from autosampler.reporting import IterationReporter
 from autosampler.spaces import AdaptiveSpaceModel, FeatureExtractor
 from autosampler.spaces.registry import is_adaptive_space
 from autosampler.spawners.base import SpawnerFactory
@@ -51,9 +52,12 @@ class AutoSamplerCore:
         # Initialize Checkpoint Manager
         self.checkpoint_manager = CheckpointManager(str(self.outdir / "checkpoints"))
 
+        # Terminal progress reporter (presentation only).
+        self.reporter = IterationReporter()
+
         # Initialize Engine
         _engine_kwargs = {
-            k: v for k, v in self.config.engine.dict().items() if k != "md_engine"
+            k: v for k, v in self.config.engine.model_dump().items() if k != "md_engine"
         }
         self.engine = EngineFactory.get(self.config.engine.md_engine, **_engine_kwargs)
 
@@ -73,9 +77,6 @@ class AutoSamplerCore:
             grid_size=self.config.spawning.voronoi_grid_size,
             n_neighbors=self.config.spawning.lof_neighbors,
         )
-
-        # Initialize Resampler
-        self.resampler = WEResampler()
 
         # State variables
         self.iteration = 0
@@ -147,10 +148,7 @@ class AutoSamplerCore:
             raise RuntimeError(f"Preflight checks failed:\n  - {joined}")
 
     def _adaptive_model_kwargs(self) -> dict:
-        if hasattr(self.config.adaptive_model, "model_dump"):
-            kwargs = self.config.adaptive_model.model_dump()
-        else:
-            kwargs = self.config.adaptive_model.dict()
+        kwargs = self.config.adaptive_model.model_dump()
         kwargs["space_mode"] = self.config.space_mode
         return kwargs
 
@@ -239,7 +237,7 @@ class AutoSamplerCore:
         runner_start_time = time.time()
 
         engine_kwargs = {
-            k: v for k, v in self.config.engine.dict().items() if k != "md_engine"
+            k: v for k, v in self.config.engine.model_dump().items() if k != "md_engine"
         }
         prepare_kwargs = {
             "conf": Path(self.config.system.conf_file),
@@ -294,6 +292,7 @@ class AutoSamplerCore:
             )
             for idx in range(len(walkers))
         ]
+        self._validate_trajectory_files(trajectories)
         trajectory_topology = (
             self.config.system.trajectory_topology_file or self.config.system.top_file
         )
@@ -377,22 +376,7 @@ class AutoSamplerCore:
         else:
             # Physical fixed space
             if self.config.system.project_file:
-                import importlib.util
-                import sys
-
-                project_path = Path(self.config.system.project_file)
-                spec = importlib.util.spec_from_file_location(
-                    "custom_project", str(project_path)
-                )
-                custom_project = importlib.util.module_from_spec(spec)
-                sys.modules["custom_project"] = custom_project
-                spec.loader.exec_module(custom_project)
-
-                points = custom_project.extract_cvs(
-                    trajectories=trajectories,
-                    top_file=self.config.system.top_file,
-                    conf_file=self.config.system.conf_file,
-                )
+                points = self._extract_physical_cvs(trajectories)
             else:
                 # Fallback to internal Rg-RMSD
                 points = feature_extractor.extract_rg_rmsd(
@@ -406,26 +390,12 @@ class AutoSamplerCore:
             and self.config.system.project_file
         ):
             try:
-                import importlib.util
-                import sys
-
-                project_path = Path(self.config.system.project_file)
-                spec = importlib.util.spec_from_file_location(
-                    "custom_project", str(project_path)
-                )
-                custom_project = importlib.util.module_from_spec(spec)
-                sys.modules["custom_project"] = custom_project
-                spec.loader.exec_module(custom_project)
-                physical_points = custom_project.extract_cvs(
-                    trajectories=trajectories,
-                    top_file=self.config.system.top_file,
-                    conf_file=self.config.system.conf_file,
-                )
+                physical_points = self._extract_physical_cvs(trajectories)
                 np.savez_compressed(
                     self.outdir / f"iter_{self.iteration}" / "physical_cvs.npz",
                     cvs=physical_points,
                 )
-            except Exception as e:
+            except (ImportError, AttributeError, RuntimeError, OSError, ValueError) as e:
                 logging.warning(f"Failed to extract physical CVs for evaluation: {e}")
 
         np.savez_compressed(
@@ -540,42 +510,13 @@ class AutoSamplerCore:
             trajectories=trajectories,
         )
 
-        # Informative Output Logging (Tabular UI)
-        PURPLE, CYAN, GREEN, YELLOW, RED, BOLD, END = (
-            "\033[95m",
-            "\033[96m",
-            "\033[92m",
-            "\033[93m",
-            "\033[91m",
-            "\033[1m",
-            "\033[0m",
+        # Informative per-iteration banner (presentation extracted to reporting).
+        self.reporter.print_summary(
+            iteration=self.iteration - 1,
+            runner_time=runner_time,
+            other_time=other_time,
+            occupancy=bin_occupancy_str,
         )
-        width = 85
-
-        summary_str = (
-            f" Iteration: {CYAN}{self.iteration - 1:<4}{END} | "
-            f"Runner: {CYAN}{runner_time:<6.2f}s{END} | "
-            f"Other: {CYAN}{other_time:<5.2f}s{END} | "
-            f"Occupancy: {CYAN}{bin_occupancy_str:<9}{END}"
-        )
-
-        # Calculate visual length safely by stripping ANSI codes to center properly
-        # Alternatively, we just construct a fixed width using raw strings then apply color.
-        raw_summary = f" Iteration: {self.iteration - 1:<4} | Runner: {runner_time:<6.2f}s | Other: {other_time:<5.2f}s | Occupancy: {bin_occupancy_str:<9}"
-        left_pad = (width - len(raw_summary)) // 2
-        right_pad = width - len(raw_summary) - left_pad
-
-        result = f"\t{RED}╔" + "═" * width + f"╗\n{END}"
-        result += (
-            f"\t{RED}║{END}"
-            + " " * left_pad
-            + summary_str
-            + " " * right_pad
-            + f"{RED}║\n{END}"
-        )
-        result += f"\t{RED}╚" + "═" * width + f"╝{END}"
-
-        print(result)
 
         return {
             "success": results,
@@ -727,6 +668,47 @@ class AutoSamplerCore:
         self.convergence_reason = state.get("convergence_reason")
         if self.msm_monitor is not None and state.get("msm_monitor"):
             self.msm_monitor.load_state_dict(state["msm_monitor"])
+
+    @staticmethod
+    def _validate_trajectory_files(trajectories: List[str]) -> None:
+        """Ensure each expected trajectory exists and is non-empty before reading.
+
+        A walker can report success yet leave a missing or truncated file (disk
+        full, killed writer); catching it here gives a clear error instead of an
+        opaque downstream parse failure.
+        """
+        bad: list[str] = []
+        for path in trajectories:
+            p = Path(path)
+            if not p.is_file():
+                bad.append(f"missing: {path}")
+            elif p.stat().st_size == 0:
+                bad.append(f"empty: {path}")
+        if bad:
+            joined = "\n  - ".join(bad)
+            raise RuntimeError(
+                "Trajectory files are not usable for CV extraction:\n  - " + joined
+            )
+
+    def _extract_physical_cvs(self, trajectories: List[str]) -> np.ndarray:
+        """Load the user project file and extract physical CVs for ``trajectories``.
+
+        Centralises the ``project_file`` import + ``extract_cvs`` call that was
+        previously duplicated for both the fixed-space projection and the
+        evaluation-only physical CVs.
+        """
+        project_path = Path(self.config.system.project_file)
+        spec = importlib.util.spec_from_file_location(
+            "custom_project", str(project_path)
+        )
+        custom_project = importlib.util.module_from_spec(spec)
+        sys.modules["custom_project"] = custom_project
+        spec.loader.exec_module(custom_project)
+        return custom_project.extract_cvs(
+            trajectories=trajectories,
+            top_file=self.config.system.top_file,
+            conf_file=self.config.system.conf_file,
+        )
 
     def _collect_msm_trajectories(self) -> List[Any]:
         """Split cumulative history projections into continuous per-walker trajectories.

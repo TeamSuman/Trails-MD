@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, root_validator, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SystemConfig(BaseModel):
@@ -38,7 +38,8 @@ class EngineConfig(BaseModel):
     amber_extra_args: List[str] = []
     amber_trajectory_format: str = "auto"
 
-    @validator("gpu_ids")
+    @field_validator("gpu_ids")
+    @classmethod
     def validate_gpu_ids(cls, value: Optional[List[int]]) -> Optional[List[int]]:
         if value is None:
             return None
@@ -50,7 +51,8 @@ class EngineConfig(BaseModel):
             raise ValueError("gpu_ids must not contain duplicates")
         return value
 
-    @validator("amber_trajectory_format")
+    @field_validator("amber_trajectory_format")
+    @classmethod
     def validate_amber_trajectory_format(cls, value: str) -> str:
         value = value.lower()
         if value not in {"auto", "netcdf", "ascii"}:
@@ -95,13 +97,15 @@ class AdaptiveModelConfig(BaseModel):
     spib_n_states: int = 10
     spib_beta: float = 1e-3
 
-    @validator("lagtime", "latent_dim", "epochs")
+    @field_validator("lagtime", "latent_dim", "epochs")
+    @classmethod
     def validate_positive_int(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("must be greater than 0")
         return value
 
-    @validator("batch_size")
+    @field_validator("batch_size")
+    @classmethod
     def validate_batch_size(cls, value: Union[int, str]) -> Union[int, str]:
         if isinstance(value, str):
             if value != "auto":
@@ -111,19 +115,22 @@ class AdaptiveModelConfig(BaseModel):
             raise ValueError("batch_size must be 'auto' or a positive integer")
         return value
 
-    @validator("learning_rate")
+    @field_validator("learning_rate")
+    @classmethod
     def validate_learning_rate(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("learning_rate must be greater than 0")
         return value
 
-    @validator("dropout_rate")
+    @field_validator("dropout_rate")
+    @classmethod
     def validate_dropout_rate(cls, value: float) -> float:
         if value < 0 or value >= 1:
             raise ValueError("dropout_rate must be >= 0 and < 1")
         return value
 
-    @validator("encoder_hidden_dims", "decoder_hidden_dims", "deep_tica_hidden_dims")
+    @field_validator("encoder_hidden_dims", "decoder_hidden_dims", "deep_tica_hidden_dims")
+    @classmethod
     def validate_hidden_dims(cls, value: List[int]) -> List[int]:
         if not value:
             raise ValueError("hidden dimension lists must not be empty")
@@ -164,27 +171,31 @@ class MSMConfig(BaseModel):
     convergence_mode: str = "all"  # "all" | "any"
     convergence_patience: int = 2
 
-    @validator("cadence", "lagtime", "n_microstates", "n_timescales")
+    @field_validator("cadence", "lagtime", "n_microstates", "n_timescales")
+    @classmethod
     def _positive(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("must be greater than 0")
         return value
 
-    @validator("cluster_method")
+    @field_validator("cluster_method")
+    @classmethod
     def _cluster_method(cls, value: str) -> str:
         value = value.lower()
         if value not in {"kmeans", "regspace"}:
             raise ValueError("cluster_method must be 'kmeans' or 'regspace'")
         return value
 
-    @validator("estimator")
+    @field_validator("estimator")
+    @classmethod
     def _estimator(cls, value: str) -> str:
         value = value.lower()
         if value not in {"mle", "bayesian"}:
             raise ValueError("estimator must be 'mle' or 'bayesian'")
         return value
 
-    @validator("convergence_mode")
+    @field_validator("convergence_mode")
+    @classmethod
     def _mode(cls, value: str) -> str:
         value = value.lower()
         if value not in {"all", "any"}:
@@ -211,7 +222,8 @@ class AutoSamplerConfig(BaseModel):
     adaptive_feature_type: str = "distances"
     adaptive_model: AdaptiveModelConfig = Field(default_factory=AdaptiveModelConfig)
 
-    @validator("space_mode")
+    @field_validator("space_mode")
+    @classmethod
     def validate_space_mode(cls, value: str) -> str:
         from autosampler.spaces.registry import FIXED_MODE, adaptive_modes
 
@@ -220,7 +232,8 @@ class AutoSamplerConfig(BaseModel):
             raise ValueError(f"space_mode must be one of {valid}; got {value!r}")
         return value
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def promote_spawning_n_bins(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         values = dict(values)
         if "n_bins" not in values:

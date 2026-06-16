@@ -17,7 +17,7 @@ This module exposes the network pieces plus :func:`train_spib`, which the
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -25,7 +25,7 @@ from torch import nn
 
 
 def _make_mlp(input_size: int, hidden_dims: Sequence[int], dropout: float) -> nn.Sequential:
-    layers: List[nn.Module] = []
+    layers: list[nn.Module] = []
     prev = input_size
     for width in hidden_dims:
         layers += [nn.Linear(prev, width), nn.SiLU()]
@@ -108,7 +108,7 @@ def train_spib(
     n_states: int = 10,
     beta: float = 1e-3,
     dropout: float = 0.0,
-    device: Optional[str] = None,
+    device: str | None = None,
     seed: int = 42,
 ) -> SPIBEncoder:
     """Train SPIB and return the encoder (CPU, eval mode) for projection.
@@ -135,8 +135,8 @@ def train_spib(
 
     # Build time-lagged (x_t, label_{t+lag}) pairs within each trajectory.
     offset = 0
-    xs: List[np.ndarray] = []
-    ys: List[np.ndarray] = []
+    xs: list[np.ndarray] = []
+    ys: list[np.ndarray] = []
     for traj in traj_list:
         length = len(traj)
         if length > lagtime:

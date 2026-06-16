@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional
 
 import numpy as np
 
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 class CriterionStatus:
     name: str
     satisfied: bool
-    value: Optional[float]
+    value: float | None
     detail: str
 
 
@@ -43,7 +42,7 @@ class ConvergenceCriterion(ABC):
     def update(self, result: MSMResult) -> CriterionStatus:
         """Record ``result`` and report whether the test is currently satisfied."""
 
-    def reset(self) -> None:  # pragma: no cover - trivial default
+    def reset(self) -> None:  # noqa: B027 - optional no-op hook, not abstract
         """Clear accumulated history (used when restarting a monitor)."""
 
 
@@ -64,7 +63,7 @@ class ImpliedTimescaleCriterion(ConvergenceCriterion):
     def __init__(self, tol: float = 0.1, n_timescales: int = 2) -> None:
         self.tol = float(tol)
         self.n_timescales = int(n_timescales)
-        self._prev: Optional[np.ndarray] = None
+        self._prev: np.ndarray | None = None
 
     def reset(self) -> None:
         self._prev = None
@@ -77,7 +76,9 @@ class ImpliedTimescaleCriterion(ConvergenceCriterion):
         if self._prev is None or self._prev.size != ts.size:
             self._prev = ts
             return CriterionStatus(self.name, False, None, "baseline established")
-        changes = [_relative_change(p, c) for p, c in zip(self._prev, ts)]
+        changes = [
+            _relative_change(p, c) for p, c in zip(self._prev, ts, strict=False)
+        ]
         max_change = float(max(changes))
         self._prev = ts
         satisfied = max_change < self.tol
@@ -96,7 +97,7 @@ class VAMP2Criterion(ConvergenceCriterion):
 
     def __init__(self, tol: float = 0.05) -> None:
         self.tol = float(tol)
-        self._prev: Optional[float] = None
+        self._prev: float | None = None
 
     def reset(self) -> None:
         self._prev = None
@@ -129,7 +130,7 @@ class StationaryDistributionCriterion(ConvergenceCriterion):
 
     def __init__(self, tol: float = 0.05) -> None:
         self.tol = float(tol)
-        self._prev: Optional[np.ndarray] = None
+        self._prev: np.ndarray | None = None
 
     def reset(self) -> None:
         self._prev = None
@@ -211,7 +212,7 @@ class ConvergenceMonitor:
 
     def __init__(
         self,
-        criteria: List[ConvergenceCriterion],
+        criteria: list[ConvergenceCriterion],
         mode: str = "all",
         patience: int = 2,
     ) -> None:
@@ -224,8 +225,8 @@ class ConvergenceMonitor:
         self.patience = int(patience)
         self.streak = 0
         self.converged = False
-        self.reason: Optional[str] = None
-        self.last_statuses: List[CriterionStatus] = []
+        self.reason: str | None = None
+        self.last_statuses: list[CriterionStatus] = []
 
     def update(self, result: MSMResult) -> bool:
         """Feed a new MSMResult; return whether convergence is now declared."""

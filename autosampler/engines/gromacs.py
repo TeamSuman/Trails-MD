@@ -32,7 +32,7 @@ from typing import Optional
 
 import numpy as np
 
-from .base import MDEngine
+from .base import MDEngine, md_subprocess_timeout
 
 
 class GromacsEngine(MDEngine):
@@ -243,6 +243,7 @@ class GromacsEngine(MDEngine):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=md_subprocess_timeout(),
             )
         except subprocess.CalledProcessError as exc:
             logging.error(
@@ -250,6 +251,13 @@ class GromacsEngine(MDEngine):
                 run_index,
                 exc.returncode,
                 exc.stderr,
+            )
+            return False
+        except subprocess.TimeoutExpired:
+            logging.error(
+                "GromacsEngine grompp run %d timed out after %ss.",
+                run_index,
+                md_subprocess_timeout(),
             )
             return False
         except FileNotFoundError:
@@ -283,6 +291,7 @@ class GromacsEngine(MDEngine):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=md_subprocess_timeout(),
             )
         except subprocess.CalledProcessError as exc:
             logging.error(
@@ -290,6 +299,13 @@ class GromacsEngine(MDEngine):
                 run_index,
                 exc.returncode,
                 exc.stderr,
+            )
+            return False
+        except subprocess.TimeoutExpired:
+            logging.error(
+                "GromacsEngine mdrun run %d timed out after %ss.",
+                run_index,
+                md_subprocess_timeout(),
             )
             return False
         except FileNotFoundError:

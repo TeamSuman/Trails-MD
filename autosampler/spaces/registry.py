@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import importlib.util
 from dataclasses import dataclass
-from typing import Dict, Tuple
 
 FIXED_MODE = "fixed"
 
@@ -39,12 +38,12 @@ class CVMethod:
     backend: str  # 'sklearn' | 'deeptime' | 'mlcolvar' | 'builtin'
     time_lagged: bool  # uses a lag time (dynamics-aware)
     supervised: bool  # requires per-frame state labels
-    requires: Tuple[str, ...]  # importable module names needed at runtime
+    requires: tuple[str, ...]  # importable module names needed at runtime
     description: str
     optional: bool = False  # needs an optional / extra dependency
 
 
-_METHODS: Dict[str, CVMethod] = {
+_METHODS: dict[str, CVMethod] = {
     "pca": CVMethod(
         "pca", "sklearn", False, False, ("sklearn",),
         "Linear PCA baseline.",
@@ -88,12 +87,12 @@ _INSTALL_HINTS = {
 }
 
 
-def all_methods() -> Dict[str, CVMethod]:
+def all_methods() -> dict[str, CVMethod]:
     """Return a copy of the full method registry."""
     return dict(_METHODS)
 
 
-def adaptive_modes() -> Tuple[str, ...]:
+def adaptive_modes() -> tuple[str, ...]:
     """Names of all adaptive (learned) CV methods."""
     return tuple(_METHODS)
 

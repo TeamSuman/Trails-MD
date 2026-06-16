@@ -19,7 +19,8 @@ it; a clear error is raised only when estimation is actually attempted.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -42,8 +43,8 @@ def _require_deeptime():
         ) from exc
 
 
-def _as_traj_list(trajs: Sequence[np.ndarray]) -> List[np.ndarray]:
-    out: List[np.ndarray] = []
+def _as_traj_list(trajs: Sequence[np.ndarray]) -> list[np.ndarray]:
+    out: list[np.ndarray] = []
     for traj in trajs:
         arr = np.asarray(traj, dtype=float)
         if arr.ndim == 1:
@@ -89,11 +90,11 @@ class MSMEstimator:
         n_microstates: int = 100,
         cluster_method: str = "kmeans",
         estimator: str = "mle",
-        n_metastable: Optional[int] = None,
+        n_metastable: int | None = None,
         n_timescales: int = 3,
-        lagtimes: Optional[Sequence[int]] = None,
+        lagtimes: Sequence[int] | None = None,
         n_bayesian_samples: int = 50,
-        regspace_dmin: Optional[float] = None,
+        regspace_dmin: float | None = None,
         seed: int = 42,
         **_: Any,
     ) -> None:
@@ -103,7 +104,7 @@ class MSMEstimator:
         self.estimator = str(estimator).lower()
         self.n_metastable = None if n_metastable is None else int(n_metastable)
         self.n_timescales = int(n_timescales)
-        self.lagtimes = [int(l) for l in lagtimes] if lagtimes else None
+        self.lagtimes = [int(lt) for lt in lagtimes] if lagtimes else None
         self.n_bayesian_samples = int(n_bayesian_samples)
         self.regspace_dmin = regspace_dmin
         self.seed = int(seed)
@@ -165,7 +166,7 @@ class MSMEstimator:
     # ------------------------------------------------------------------ #
     # MSM estimation
     # ------------------------------------------------------------------ #
-    def _count_model(self, dtrajs: List[np.ndarray], lagtime: int):
+    def _count_model(self, dtrajs: list[np.ndarray], lagtime: int):
         from deeptime.markov import TransitionCountEstimator
 
         count_mode = "effective" if self.estimator == "bayesian" else "sliding"
@@ -184,7 +185,7 @@ class MSMEstimator:
             return posterior
         return MaximumLikelihoodMSM().fit_fetch(connected_counts)
 
-    def fit(self, trajs: Sequence[np.ndarray], iteration: Optional[int] = None) -> MSMResult:
+    def fit(self, trajs: Sequence[np.ndarray], iteration: int | None = None) -> MSMResult:
         """Cluster, estimate the MSM and return a serialisable result."""
         _require_deeptime()
         dtrajs, cluster_model = self.cluster(trajs)
@@ -229,7 +230,7 @@ class MSMEstimator:
         )
 
     def implied_timescales(
-        self, dtrajs: List[np.ndarray], lagtimes: Sequence[int]
+        self, dtrajs: list[np.ndarray], lagtimes: Sequence[int]
     ) -> ITSResult:
         """Estimate implied timescales across a ladder of lag times."""
         from deeptime.markov.msm import MaximumLikelihoodMSM
@@ -276,7 +277,7 @@ class MSMEstimator:
         return prior, errors
 
     @staticmethod
-    def _safe_score(msm, dtrajs) -> Optional[float]:
+    def _safe_score(msm, dtrajs) -> float | None:
         try:
             return float(msm.score(dtrajs=dtrajs, r=2))
         except Exception as exc:  # noqa: BLE001 - scoring is best-effort
@@ -307,7 +308,7 @@ class MSMEstimator:
 class MSMEstimatorFactory:
     """Registry for MSM estimator variants, mirroring SpawnerFactory/EngineFactory."""
 
-    _registry: Dict[str, type] = {}
+    _registry: dict[str, type] = {}
 
     @classmethod
     def register(cls, name: str, estimator_cls: type) -> None:

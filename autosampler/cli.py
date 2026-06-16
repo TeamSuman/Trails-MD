@@ -7,10 +7,13 @@ import copy
 import logging
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/autosampler-matplotlib")
+os.environ.setdefault(
+    "MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "autosampler-matplotlib")
+)
 
 SYSTEM_PATH_KEYS = (
     "conf_file",

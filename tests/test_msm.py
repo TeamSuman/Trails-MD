@@ -12,7 +12,6 @@ from autosampler.msm import (  # noqa: E402
     ImpliedTimescaleCriterion,
     MSMEstimator,
     MSMResult,
-    StationaryDistributionCriterion,
     VAMP2Criterion,
     build_criterion,
 )

@@ -9,9 +9,9 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
+import autosampler.spawners.msm  # noqa: E402,F401  (ensures registration)
 from autosampler.config import AutoSamplerConfig, MSMConfig  # noqa: E402
 from autosampler.spawners import SpawnerFactory  # noqa: E402
-import autosampler.spawners.msm  # noqa: E402,F401  (ensures registration)
 
 
 def _base_config(**overrides):
@@ -33,11 +33,13 @@ def test_msm_disabled_by_default():
 
 
 def test_msm_config_validation():
-    with pytest.raises(Exception):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         MSMConfig(cluster_method="banana")
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         MSMConfig(estimator="frequentist")
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         MSMConfig(lagtime=0)
     good = MSMConfig(enabled=True, estimator="bayesian", n_metastable=4)
     assert good.estimator == "bayesian"

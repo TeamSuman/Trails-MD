@@ -12,13 +12,13 @@ lives in :mod:`autosampler.msm.estimator`. Here we only describe the *results*.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
 import numpy as np
 
 
-def _to_array(value: Any) -> Optional[np.ndarray]:
+def _to_array(value: Any) -> np.ndarray | None:
     if value is None:
         return None
     return np.asarray(value, dtype=float)
@@ -41,14 +41,14 @@ class ITSResult:
     lagtimes: np.ndarray
     timescales: np.ndarray
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "lagtimes": np.asarray(self.lagtimes).tolist(),
             "timescales": np.asarray(self.timescales).tolist(),
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ITSResult":
+    def from_dict(cls, data: dict[str, Any]) -> ITSResult:
         return cls(
             lagtimes=np.asarray(data["lagtimes"]),
             timescales=np.asarray(data["timescales"], dtype=float),
@@ -71,24 +71,24 @@ class MSMResult:
     transition_matrix: np.ndarray
     cluster_centers: np.ndarray
     counts_per_state: np.ndarray
-    vamp2_score: Optional[float] = None
+    vamp2_score: float | None = None
     estimator: str = "mle"
-    iteration: Optional[int] = None
-    n_metastable: Optional[int] = None
-    metastable_assignments: Optional[np.ndarray] = None
-    metastable_populations: Optional[np.ndarray] = None
-    its: Optional[ITSResult] = None
+    iteration: int | None = None
+    n_metastable: int | None = None
+    metastable_assignments: np.ndarray | None = None
+    metastable_populations: np.ndarray | None = None
+    its: ITSResult | None = None
     # Bayesian statistical errors on the slowest timescales (std over posterior).
-    timescale_errors: Optional[np.ndarray] = None
-    extra: Dict[str, Any] = field(default_factory=dict)
+    timescale_errors: np.ndarray | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def slowest_timescale(self) -> Optional[float]:
+    def slowest_timescale(self) -> float | None:
         ts = np.asarray(self.timescales, dtype=float)
         finite = ts[np.isfinite(ts)]
         return float(finite[0]) if finite.size else None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         # asdict recurses into the ITSResult dataclass; normalise to its dict.
         if self.its is not None:
@@ -108,7 +108,7 @@ class MSMResult:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MSMResult":
+    def from_dict(cls, data: dict[str, Any]) -> MSMResult:
         data = dict(data)
         its = data.get("its")
         if isinstance(its, dict):
