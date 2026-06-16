@@ -203,6 +203,38 @@ class MSMConfig(BaseModel):
         return value
 
 
+class FeatureSelectionConfig(BaseModel):
+    """VAMP-2 based selection/optimisation of the input features for the CV/MSM.
+
+    Opt-in (``enabled=False`` by default). When enabled, the adaptive loop
+    periodically scores feature columns by VAMP-2 and keeps the subset that best
+    resolves the slow dynamics, adaptively updating it every ``cadence``
+    iterations.
+    """
+
+    enabled: bool = False
+    method: str = "greedy_vamp"  # "greedy_vamp" | "all"
+    lagtime: int = 10
+    cadence: int = 5  # re-select every N iterations (adaptive update)
+    max_features: Optional[int] = None  # cap on selected columns/groups
+    dim: Optional[int] = None  # singular values retained when scoring
+    min_gain: float = 1e-4  # minimum VAMP-2 gain to add a feature group
+
+    @field_validator("method")
+    @classmethod
+    def _method(cls, value: str) -> str:
+        if value not in {"greedy_vamp", "all"}:
+            raise ValueError("feature_selection.method must be 'greedy_vamp' or 'all'")
+        return value
+
+    @field_validator("lagtime", "cadence")
+    @classmethod
+    def _positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("must be greater than 0")
+        return value
+
+
 class ExecutionConfig(BaseModel):
     """Where and how walker MD jobs are dispatched.
 
@@ -257,6 +289,9 @@ class AutoSamplerConfig(BaseModel):
     spawning: SpawningConfig
     msm: MSMConfig = Field(default_factory=MSMConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    feature_selection: FeatureSelectionConfig = Field(
+        default_factory=FeatureSelectionConfig
+    )
     space_mode: str = "fixed"
     n_bins: List[int] = [30, 30]
     min_values: Optional[List[float]] = None

@@ -93,6 +93,22 @@ class AutoSamplerCore:
         self.converged = False
         self.convergence_reason = None
 
+        # VAMP-2 input-feature selection (opt-in via config.feature_selection).
+        self.feature_selector = None
+        self.feature_selection_indices = None
+        self.last_feature_selection = None
+        fs_cfg = getattr(self.config, "feature_selection", None)
+        if fs_cfg is not None and fs_cfg.enabled:
+            from autosampler.spaces.feature_selection import FeatureSelector
+
+            self.feature_selector = FeatureSelector(
+                lagtime=fs_cfg.lagtime,
+                method=fs_cfg.method,
+                max_features=fs_cfg.max_features,
+                dim=fs_cfg.dim,
+                min_gain=fs_cfg.min_gain,
+            )
+
         # MSM subsystem (opt-in via config.msm.enabled).
         self.msm_estimator = None
         self.msm_monitor = None
@@ -364,8 +380,11 @@ class AutoSamplerCore:
                     total_walkers = len(walkers)
 
                 n_frames = self.config.spawning.step // self.config.spawning.stride
+                self._maybe_select_features(fit_features, n_frames, total_walkers)
                 self.space_model.fit(
-                    fit_features, walker_length=n_frames, n_walkers=total_walkers
+                    self._fs_apply(fit_features),
+                    walker_length=n_frames,
+                    n_walkers=total_walkers,
                 )
                 self.scaler = self.space_model.scaler
                 self.adaptive_space_version += 1
@@ -373,7 +392,7 @@ class AutoSamplerCore:
 
             # Project onto latent space (project only current iteration features for history tracking)
             logging.info("Projecting features to latent space...")
-            points = self.space_model.project(features)
+            points = self.space_model.project(self._fs_apply(features))
         else:
             # Physical fixed space
             if self.config.system.project_file:
@@ -603,7 +622,7 @@ class AutoSamplerCore:
                     entry["projection"] = None
                 continue
             entry["projection"] = self.space_model.project(
-                np.asarray(features, dtype=float)
+                self._fs_apply(np.asarray(features, dtype=float))
             )
             entry["space_version"] = self.adaptive_space_version
 
@@ -650,6 +669,7 @@ class AutoSamplerCore:
             "msm_monitor": self.msm_monitor.state_dict()
             if self.msm_monitor is not None
             else None,
+            "feature_selection_indices": self.feature_selection_indices,
         }
 
     def _restore_sampler_state(self, state: Dict[str, Any] | None) -> None:
@@ -667,6 +687,8 @@ class AutoSamplerCore:
         self.convergence_stall_count = int(state.get("convergence_stall_count", 0))
         self.converged = bool(state.get("converged", False))
         self.convergence_reason = state.get("convergence_reason")
+        if state.get("feature_selection_indices") is not None:
+            self.feature_selection_indices = list(state["feature_selection_indices"])
         if self.msm_monitor is not None and state.get("msm_monitor"):
             self.msm_monitor.load_state_dict(state["msm_monitor"])
 
@@ -690,6 +712,46 @@ class AutoSamplerCore:
             raise RuntimeError(
                 "Trajectory files are not usable for CV extraction:\n  - " + joined
             )
+
+    def _fs_apply(self, features: np.ndarray) -> np.ndarray:
+        """Restrict features to the VAMP-selected columns (no-op if disabled)."""
+        if self.feature_selection_indices is None:
+            return features
+        return np.asarray(features)[:, self.feature_selection_indices]
+
+    def _maybe_select_features(
+        self, fit_features: np.ndarray, walker_length: int, n_walkers: int
+    ) -> None:
+        """(Re)select input-feature columns by VAMP-2 when due (opt-in)."""
+        if self.feature_selector is None:
+            return
+        cadence = self.config.feature_selection.cadence
+        due = self.feature_selection_indices is None or (
+            cadence > 0 and self.iteration % cadence == 0
+        )
+        if not due:
+            return
+
+        trajs = [
+            np.asarray(fit_features[i * walker_length : (i + 1) * walker_length])
+            for i in range(max(1, n_walkers))
+        ]
+        trajs = [t for t in trajs if len(t) > self.feature_selector.lagtime]
+        if not trajs:
+            return
+        try:
+            selection = self.feature_selector.select(trajs)
+        except (ValueError, np.linalg.LinAlgError) as exc:
+            logging.warning("Feature selection skipped: %s", exc)
+            return
+        self.feature_selection_indices = selection.columns
+        self.last_feature_selection = selection
+        logging.info(
+            "VAMP-2 feature selection: kept %d/%d features (score %.3f).",
+            len(selection.columns),
+            np.asarray(fit_features).shape[1],
+            selection.score,
+        )
 
     def _extract_physical_cvs(self, trajectories: List[str]) -> np.ndarray:
         """Load the user project file and extract physical CVs for ``trajectories``.
