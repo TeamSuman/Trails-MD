@@ -91,3 +91,23 @@ def test_feature_selection_config_validation():
         FeatureSelectionConfig(method="banana")
     with pytest.raises(ValidationError):
         FeatureSelectionConfig(lagtime=0)
+
+
+def test_candidate_feature_types_validation():
+    from pydantic import ValidationError
+
+    cfg = FeatureSelectionConfig(
+        enabled=True, candidate_feature_types=["distances", "phi_psi"]
+    )
+    assert cfg.candidate_feature_types == ["distances", "phi_psi"]
+    with pytest.raises(ValidationError):
+        FeatureSelectionConfig(candidate_feature_types=["distances", "nope"])
+
+
+def test_rank_candidates_selects_best_feature_type():
+    # Simulate two feature *types*: one resolves the slow process, one is noise.
+    traj = _slow_plus_noise()
+    ranked = rank_candidates(
+        {"distances": [traj[:, [0]]], "fitted_coords": [traj[:, 1:]]}, lagtime=10
+    )
+    assert ranked[0][0] == "distances"

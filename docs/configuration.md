@@ -77,6 +77,7 @@ VAMP-2 input-feature selection (opt-in). See [Feature selection](feature_selecti
 | `cadence` | `5` | Re-select every N iterations. |
 | `max_features` | `None` | Cap on selected columns/groups. |
 | `min_gain` | `1e-4` | Minimum VAMP-2 gain to keep adding features. |
+| `candidate_feature_types` | `[]` | Rank these feature types by VAMP-2 and use the best (subset of `distances`/`fitted_coords`/`phi_psi`). |
 
 ## `msm`
 

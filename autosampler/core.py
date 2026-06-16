@@ -97,6 +97,7 @@ class AutoSamplerCore:
         self.feature_selector = None
         self.feature_selection_indices = None
         self.last_feature_selection = None
+        self.selected_feature_type = None
         fs_cfg = getattr(self.config, "feature_selection", None)
         if fs_cfg is not None and fs_cfg.enabled:
             from autosampler.spaces.feature_selection import FeatureSelector
@@ -329,19 +330,9 @@ class AutoSamplerCore:
         )
 
         if is_adaptive_space(self.config.space_mode):
-            # Feature Extraction
-            adaptive_feature_type = getattr(
-                self.config, "adaptive_feature_type", "distances"
+            features = self._extract_adaptive_features(
+                feature_extractor, trajectories
             )
-            if adaptive_feature_type == "phi_psi":
-                logging.info("Extracting AIB9 phi/psi dihedral features...")
-                features = feature_extractor.extract_aib9_phi_psi(trajectories)
-            elif adaptive_feature_type == "fitted_coords":
-                logging.info("Extracting fitted Cartesian coordinate features...")
-                features = feature_extractor.extract_fitted_coords(trajectories)
-            else:
-                logging.info("Extracting pairwise distance features...")
-                features = feature_extractor.extract_pairwise_distances(trajectories)
 
             if self.config.save_features:
                 np.savez_compressed(
@@ -695,6 +686,7 @@ class AutoSamplerCore:
             if self.msm_monitor is not None
             else None,
             "feature_selection_indices": self.feature_selection_indices,
+            "selected_feature_type": self.selected_feature_type,
             "retrain_controller": self.retrain_controller.state_dict(),
         }
 
@@ -715,6 +707,8 @@ class AutoSamplerCore:
         self.convergence_reason = state.get("convergence_reason")
         if state.get("feature_selection_indices") is not None:
             self.feature_selection_indices = list(state["feature_selection_indices"])
+        if state.get("selected_feature_type") is not None:
+            self.selected_feature_type = state["selected_feature_type"]
         self.retrain_controller.load_state_dict(state.get("retrain_controller", {}))
         if self.msm_monitor is not None and state.get("msm_monitor"):
             self.msm_monitor.load_state_dict(state["msm_monitor"])
@@ -745,6 +739,72 @@ class AutoSamplerCore:
         if self.feature_selection_indices is None:
             return features
         return np.asarray(features)[:, self.feature_selection_indices]
+
+    def _extract_feature_type(
+        self, feature_extractor: FeatureExtractor, trajectories: List[str], ftype: str
+    ) -> np.ndarray:
+        if ftype == "phi_psi":
+            return feature_extractor.extract_aib9_phi_psi(trajectories)
+        if ftype == "fitted_coords":
+            return feature_extractor.extract_fitted_coords(trajectories)
+        return feature_extractor.extract_pairwise_distances(trajectories)
+
+    def _extract_adaptive_features(
+        self, feature_extractor: FeatureExtractor, trajectories: List[str]
+    ) -> np.ndarray:
+        """Extract input features, optionally ranking candidate feature *types* by VAMP-2."""
+        fs_cfg = getattr(self.config, "feature_selection", None)
+        candidates = list(getattr(fs_cfg, "candidate_feature_types", []) or [])
+        default_type = getattr(self.config, "adaptive_feature_type", "distances")
+
+        if not (fs_cfg and fs_cfg.enabled and candidates):
+            logging.info("Extracting %s features...", default_type)
+            return self._extract_feature_type(
+                feature_extractor, trajectories, self.selected_feature_type or default_type
+            )
+
+        due = self.selected_feature_type is None or (
+            fs_cfg.cadence > 0 and self.iteration % fs_cfg.cadence == 0
+        )
+        if not due:
+            return self._extract_feature_type(
+                feature_extractor, trajectories, self.selected_feature_type
+            )
+
+        # Extract every candidate type and rank them by VAMP-2.
+        from autosampler.spaces.feature_selection import rank_candidates
+
+        n_frames = self.config.spawning.step // self.config.spawning.stride
+        extracted: Dict[str, np.ndarray] = {}
+        for ftype in candidates:
+            try:
+                extracted[ftype] = self._extract_feature_type(
+                    feature_extractor, trajectories, ftype
+                )
+            except Exception as exc:  # noqa: BLE001 - skip system-incompatible types
+                logging.warning("Skipping feature type %r: %s", ftype, exc)
+        if not extracted:
+            return self._extract_feature_type(feature_extractor, trajectories, default_type)
+
+        candidate_trajs = {
+            ftype: [
+                feats[i * n_frames : (i + 1) * n_frames]
+                for i in range(max(1, len(feats) // max(1, n_frames)))
+            ]
+            for ftype, feats in extracted.items()
+        }
+        ranked = rank_candidates(candidate_trajs, fs_cfg.lagtime)
+        best = ranked[0][0]
+        if best != self.selected_feature_type:
+            # Column indices are tied to a feature type; reset on a type change.
+            self.feature_selection_indices = None
+            logging.info(
+                "VAMP-2 feature-type selection -> %s (scores: %s)",
+                best,
+                ", ".join(f"{n}={s:.3f}" for n, s in ranked),
+            )
+        self.selected_feature_type = best
+        return extracted[best]
 
     def _cv_vamp_score(
         self, features: np.ndarray, walker_length: int, n_walkers: int

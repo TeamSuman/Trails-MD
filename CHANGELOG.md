@@ -61,6 +61,9 @@ adds first-class **HPC scalability** and **VAMP-2 feature optimisation**.
   checkpointed. The default `fixed` policy preserves the legacy schedule.
 - **Reproducibility:** `SeedManager` now also seeds PyTorch Lightning
   (`seed_everything`, used by deep-TICA/LDA) and documents determinism limits.
+- **Feature-type selection:** `feature_selection.candidate_feature_types` ranks
+  whole feature types (`distances` / `fitted_coords` / `phi_psi`) by VAMP-2 and
+  switches the loop to the best one (re-running column selection on a change).
 
 #### Tooling & docs
 - Test suite (`pytest`) covering MSM, CV methods, execution backends, feature

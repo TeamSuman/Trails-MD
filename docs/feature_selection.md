@@ -66,7 +66,20 @@ sel = FeatureSelector(lagtime=10, method="greedy_vamp").select(trajs)
 sel.columns, sel.score
 ```
 
-!!! note "Roadmap"
-    The current protocol optimises a **subset of columns** of one feature type.
-    Ranking across different feature *types* (`rank_candidates`) is available as
-    an API and will be wired into the loop as a configurable option next.
+## Choosing among feature *types*
+
+Beyond selecting columns within one feature type, AutoSampler can rank whole
+**feature types** by VAMP-2 and use the best one. List the candidates and the
+loop extracts each, ranks them, and switches to the winner (re-running column
+selection when the type changes):
+
+```yaml
+feature_selection:
+  enabled: true
+  candidate_feature_types: [distances, fitted_coords]   # subset of:
+                                                        # distances | fitted_coords | phi_psi
+  cadence: 5            # re-rank types every 5 iterations
+```
+
+When `candidate_feature_types` is empty (default) the top-level
+`adaptive_feature_type` is used. The chosen type is checkpointed for resume.

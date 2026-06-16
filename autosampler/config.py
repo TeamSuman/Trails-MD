@@ -219,12 +219,27 @@ class FeatureSelectionConfig(BaseModel):
     max_features: Optional[int] = None  # cap on selected columns/groups
     dim: Optional[int] = None  # singular values retained when scoring
     min_gain: float = 1e-4  # minimum VAMP-2 gain to add a feature group
+    # Optional: rank these feature *types* by VAMP-2 and use the best one.
+    # Empty -> always use the top-level `adaptive_feature_type`.
+    candidate_feature_types: List[str] = []
 
     @field_validator("method")
     @classmethod
     def _method(cls, value: str) -> str:
         if value not in {"greedy_vamp", "all"}:
             raise ValueError("feature_selection.method must be 'greedy_vamp' or 'all'")
+        return value
+
+    @field_validator("candidate_feature_types")
+    @classmethod
+    def _candidate_types(cls, value: List[str]) -> List[str]:
+        valid = {"distances", "fitted_coords", "phi_psi"}
+        bad = [v for v in value if v not in valid]
+        if bad:
+            raise ValueError(
+                "feature_selection.candidate_feature_types must be a subset of "
+                f"{sorted(valid)}; got invalid {bad}"
+            )
         return value
 
     @field_validator("lagtime", "cadence")
