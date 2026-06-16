@@ -49,7 +49,7 @@ autosampler/
 
 examples/
   AlaD/                     Alanine dipeptide fixed phi/psi examples
-  AIB9/                     AIB9 fixed, learned, and handedness CV examples
+  AIB9/                     AIB9 fixed and learned CV examples
 
 ```
 
@@ -63,15 +63,15 @@ conda env create -f env.yml
 conda activate autosampler
 ```
 
-Optional learned-CV extras:
+Optional Deep-TICA extras:
 
 ```bash
-python -m pip install -e ".[deep-tica,examples,test]"
+python -m pip install -e ".[deep-tica]"
 ```
 
-External MD engines must also be installed separately if you use them:
+External engine executables must also be installed separately if you use those
+backends:
 
-- OpenMM for `engine.md_engine: openmm`
 - GROMACS executable for `engine.md_engine: gromacs`
 - Amber/pmemd executable for `engine.md_engine: amber`
 
@@ -105,7 +105,7 @@ Generate a post-hoc exploration log for a completed run:
 
 ```bash
 autosampler-log \
-  --run-dir examples/AlaD/runs/alad_phi_psi \
+  --run-dir examples/AlaD/runs/alad_phi_psi_density \
   --config examples/AlaD/config.yaml
 ```
 
@@ -113,7 +113,7 @@ Reconstruct a connected lineage path between two CV-space points:
 
 ```bash
 autosampler-path \
-  --run-dir examples/AlaD/runs/alad_phi_psi \
+  --run-dir examples/AlaD/runs/alad_phi_psi_density \
   --topology examples/AlaD/start.gro \
   --start=-1.05,-0.70 \
   --end=1.05,0.70 \
@@ -195,7 +195,7 @@ def extract_cvs(trajectories, top_file, conf_file):
 ```
 
 See `examples/AlaD/project_phi_psi.py` and
-`examples/AIB9/project_physical_handedness_2d.py` for concrete examples.
+`examples/AIB9/project_phi_psi.py` for concrete examples.
 
 ## Spawning Strategies
 
@@ -207,8 +207,7 @@ AutoSampler currently supports:
 - `fps`: farthest-point sampling for geometric spread.
 
 Voronoi note: `voronoi_clusters` controls the restart-selection partition.
-The regular `n_bins` grid is still used for run-log coverage diagnostics. See
-`VORONOI_BINNING_SCHEME.md` for the exact implementation.
+The regular `n_bins` grid is still used for run-log coverage diagnostics.
 
 ## Typical Workflow
 
@@ -222,8 +221,8 @@ The regular `n_bins` grid is still used for run-log coverage diagnostics. See
    interpretable observables.
 
 3. **Write or select a YAML config.**
-   Use `CONFIGURATION_TUTORIAL.md` for all available options. Keep path values
-   relative to the config file when possible.
+   Start from one of the YAML files under `examples/`. Keep path values relative
+   to the config file when possible.
 
 4. **Preflight the run.**
 
@@ -274,33 +273,19 @@ AlaD Voronoi smoke test:
 
 ```bash
 cd examples/AlaD
-autosampler --config config_voronoi_exact_smoke.yaml --iterations 1
+autosampler --config config_voronoi.yaml --iterations 1
 ```
 
-AIB9 physical handedness CV:
+AIB9 fixed phi/psi CV:
 
 ```bash
 cd examples/AIB9
-autosampler --config config_physical_handedness_2d_sweep.yaml --check
-```
-
-## Testing
-
-Run the test suite:
-
-```bash
-python -m pytest
-```
-
-Run a focused spawner/binning test:
-
-```bash
-python -m pytest tests/test_density_spawner.py
+autosampler --config config_fixed_phi_psi.yaml --check
 ```
 
 ## Current Status
 
-This is an active research codebase. The examples and tests are useful starting
-points, but production scientific claims should be made only after checking CV
+This is an active research codebase. The examples are useful starting points,
+but production scientific claims should be made only after checking CV
 definitions, sampling bounds, lineage connectivity, and system-specific
 validation.
