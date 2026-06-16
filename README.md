@@ -55,13 +55,12 @@ examples/
 
 ## Installation
 
-Create or activate an environment with the scientific MD stack available. The
-project metadata is in `pyproject.toml`.
+Create the conda environment from `env.yml`. It installs AutoSampler in editable
+mode and uses the project metadata in `pyproject.toml`.
 
 ```bash
-conda create -n autosampler python=3.10
+conda env create -f env.yml
 conda activate autosampler
-python -m pip install -e ".[test]"
 ```
 
 Optional learned-CV extras:
