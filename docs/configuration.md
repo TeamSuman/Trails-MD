@@ -53,7 +53,10 @@ at startup. Below, only non-obvious defaults are noted — see
 | Key | Default | Description |
 | --- | --- | --- |
 | `adaptive_feature_type` | `distances` | `distances` \| `fitted_coords` \| `phi_psi`. |
-| `retrain_freq` | `1` | Retrain the CV every N iterations. |
+| `retrain_freq` | `1` | Retrain the CV every N iterations (`fixed` policy). |
+| `retrain_policy` | `fixed` | `fixed` or `vamp_adaptive` (retrain on VAMP-2 drop). |
+| `vamp_retrain_tol` | `0.1` | Relative VAMP-2 drop that triggers a retrain. |
+| `retrain_min_interval` / `retrain_max_interval` | `1` / `None` | Bounds between adaptive retrains. |
 | `aggregate_memory` | `true` | Pool historical frames when retraining. |
 | `max_adaptive_memory_frames` | `50000` | Cap on pooled frames. |
 | `adaptive_model.lagtime` | `5` | Lag time for time-lagged CVs. |

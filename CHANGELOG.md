@@ -53,6 +53,15 @@ adds first-class **HPC scalability** and **VAMP-2 feature optimisation**.
 - `FeatureSelectionConfig` (`feature_selection.enabled`, opt-in) — re-selects
   feature columns every `cadence` iterations; selection persisted for resume.
 
+#### Adaptive CV quality & reproducibility (Phase 4)
+- **VAMP-2-driven adaptive retraining** (`retrain_policy: vamp_adaptive`):
+  `RetrainController` retrains the CV only when its VAMP-2 score on fresh data
+  drops by more than `vamp_retrain_tol` below its reference (with
+  `retrain_min_interval` / `retrain_max_interval` bounds). Reference score is
+  checkpointed. The default `fixed` policy preserves the legacy schedule.
+- **Reproducibility:** `SeedManager` now also seeds PyTorch Lightning
+  (`seed_everything`, used by deep-TICA/LDA) and documents determinism limits.
+
 #### Tooling & docs
 - Test suite (`pytest`) covering MSM, CV methods, execution backends, feature
   selection, config, spawners, and hardening — **49 tests**.

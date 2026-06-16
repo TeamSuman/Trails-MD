@@ -301,10 +301,23 @@ class AutoSamplerConfig(BaseModel):
     checkpoint_freq: int = 1
     save_features: bool = True
     retrain_freq: int = 1
+    # CV-retraining policy: "fixed" (every retrain_freq iters) or "vamp_adaptive"
+    # (retrain when the CV's VAMP-2 score drops by vamp_retrain_tol).
+    retrain_policy: str = "fixed"
+    vamp_retrain_tol: float = 0.1
+    retrain_min_interval: int = 1
+    retrain_max_interval: Optional[int] = None
     aggregate_memory: bool = True
     max_adaptive_memory_frames: int = 50000
     adaptive_feature_type: str = "distances"
     adaptive_model: AdaptiveModelConfig = Field(default_factory=AdaptiveModelConfig)
+
+    @field_validator("retrain_policy")
+    @classmethod
+    def _retrain_policy(cls, value: str) -> str:
+        if value not in {"fixed", "vamp_adaptive"}:
+            raise ValueError("retrain_policy must be 'fixed' or 'vamp_adaptive'")
+        return value
 
     @field_validator("space_mode")
     @classmethod

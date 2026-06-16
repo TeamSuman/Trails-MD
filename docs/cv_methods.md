@@ -42,6 +42,23 @@ adaptive_model:
   spib_beta: 0.001
 ```
 
+## Adaptive retraining (VAMP-2 driven)
+
+A learned CV can go stale as new regions are discovered. By default it retrains
+on a fixed schedule (`retrain_freq`). Set `retrain_policy: vamp_adaptive` to
+retrain **only when the CV's VAMP-2 score on fresh data drops** below its
+post-training reference — coupling retraining to sampling progress.
+
+```yaml
+retrain_policy: vamp_adaptive   # fixed | vamp_adaptive
+vamp_retrain_tol: 0.1           # relative VAMP-2 drop that triggers a retrain
+retrain_min_interval: 1         # don't retrain more often than this
+retrain_max_interval: 20        # force a refresh at least this often (optional)
+```
+
+The controller's reference score is checkpointed, so `--resume` continues the
+same policy.
+
 ## Availability checks
 
 If a method's backend is missing, AutoSampler raises an actionable error, e.g.:

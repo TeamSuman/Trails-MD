@@ -109,6 +109,17 @@ class AutoSamplerCore:
                 min_gain=fs_cfg.min_gain,
             )
 
+        # Adaptive CV-retraining policy (VAMP-2 driven when configured).
+        from autosampler.spaces.retraining import RetrainController
+
+        self.retrain_controller = RetrainController(
+            policy=self.config.retrain_policy,
+            retrain_freq=self.config.retrain_freq,
+            vamp_tol=self.config.vamp_retrain_tol,
+            min_interval=self.config.retrain_min_interval,
+            max_interval=self.config.retrain_max_interval,
+        )
+
         # MSM subsystem (opt-in via config.msm.enabled).
         self.msm_estimator = None
         self.msm_monitor = None
@@ -341,19 +352,29 @@ class AutoSamplerCore:
             if self.config.aggregate_memory:
                 self.feature_memory.append(features)
 
-            # Train or update the Space Model
-            if self.space_model is None or (
-                self.config.retrain_freq > 0
-                and self.iteration % self.config.retrain_freq == 0
-            ):
+            # Train or update the Space Model (cadence decided by RetrainController)
+            n_frames = self.config.spawning.step // self.config.spawning.stride
+            has_model = self.space_model is not None
+            current_cv_score = None
+            if has_model and self.config.retrain_policy == "vamp_adaptive":
+                current_cv_score = self._cv_vamp_score(features, n_frames, len(walkers))
+            do_retrain = self.retrain_controller.should_retrain(
+                self.iteration, has_model, current_cv_score
+            )
+
+            if do_retrain:
                 if self.space_model is None:
                     logging.info(f"Training new {self.config.space_mode} model...")
                     self.space_model = AdaptiveSpaceModel(
                         **self._adaptive_model_kwargs()
                     )
                 else:
+                    reason = self.retrain_controller.last_reason or "scheduled"
                     logging.info(
-                        f"Retraining {self.config.space_mode} model (iteration {self.iteration})..."
+                        "Retraining %s model (iteration %d): %s",
+                        self.config.space_mode,
+                        self.iteration,
+                        reason,
                     )
 
                 if self.config.aggregate_memory:
@@ -379,7 +400,6 @@ class AutoSamplerCore:
                     fit_features = features
                     total_walkers = len(walkers)
 
-                n_frames = self.config.spawning.step // self.config.spawning.stride
                 self._maybe_select_features(fit_features, n_frames, total_walkers)
                 self.space_model.fit(
                     self._fs_apply(fit_features),
@@ -389,6 +409,11 @@ class AutoSamplerCore:
                 self.scaler = self.space_model.scaler
                 self.adaptive_space_version += 1
                 self._refresh_adaptive_history_projections()
+                self.retrain_controller.notify_retrained(
+                    self._cv_vamp_score(features, n_frames, len(walkers))
+                )
+            else:
+                self.retrain_controller.notify_skipped()
 
             # Project onto latent space (project only current iteration features for history tracking)
             logging.info("Projecting features to latent space...")
@@ -670,6 +695,7 @@ class AutoSamplerCore:
             if self.msm_monitor is not None
             else None,
             "feature_selection_indices": self.feature_selection_indices,
+            "retrain_controller": self.retrain_controller.state_dict(),
         }
 
     def _restore_sampler_state(self, state: Dict[str, Any] | None) -> None:
@@ -689,6 +715,7 @@ class AutoSamplerCore:
         self.convergence_reason = state.get("convergence_reason")
         if state.get("feature_selection_indices") is not None:
             self.feature_selection_indices = list(state["feature_selection_indices"])
+        self.retrain_controller.load_state_dict(state.get("retrain_controller", {}))
         if self.msm_monitor is not None and state.get("msm_monitor"):
             self.msm_monitor.load_state_dict(state["msm_monitor"])
 
@@ -718,6 +745,33 @@ class AutoSamplerCore:
         if self.feature_selection_indices is None:
             return features
         return np.asarray(features)[:, self.feature_selection_indices]
+
+    def _cv_vamp_score(
+        self, features: np.ndarray, walker_length: int, n_walkers: int
+    ) -> float | None:
+        """VAMP-2 score of the current CV's latent projection of ``features``."""
+        if self.space_model is None:
+            return None
+        try:
+            latent = np.asarray(self.space_model.project(self._fs_apply(features)))
+        except Exception:  # noqa: BLE001 - scoring is best-effort
+            return None
+        if latent.ndim == 1:
+            latent = latent.reshape(-1, 1)
+        from autosampler.spaces.feature_selection import vamp2_score
+
+        lag = self.config.adaptive_model.lagtime
+        trajs = [
+            latent[i * walker_length : (i + 1) * walker_length]
+            for i in range(max(1, n_walkers))
+        ]
+        trajs = [t for t in trajs if len(t) > lag]
+        if not trajs:
+            return None
+        try:
+            return vamp2_score(trajs, lag)
+        except (ValueError, np.linalg.LinAlgError):
+            return None
 
     def _maybe_select_features(
         self, fit_features: np.ndarray, walker_length: int, n_walkers: int
