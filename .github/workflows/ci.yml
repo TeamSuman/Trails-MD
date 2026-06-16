@@ -31,7 +31,7 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Lint (ruff)
-        run: ruff check autosampler/msm autosampler/execution autosampler/analysis autosampler/analysis_cli.py autosampler/binning/we.py autosampler/spaces/registry.py autosampler/spaces/spib.py autosampler/spaces/feature_selection.py autosampler/spaces/retraining.py autosampler/utils/seeds.py autosampler/spawners/we.py autosampler/spawners/msm.py autosampler/reporting.py autosampler/engines/base.py tests
+        run: ruff check autosampler/msm autosampler/execution autosampler/analysis autosampler/analysis_cli.py autosampler/init_cli.py autosampler/templates.py autosampler/binning/we.py autosampler/spaces/registry.py autosampler/spaces/spib.py autosampler/spaces/feature_selection.py autosampler/spaces/retraining.py autosampler/utils/seeds.py autosampler/spawners/we.py autosampler/spawners/msm.py autosampler/reporting.py autosampler/engines/base.py tests
 
       - name: Run test suite
         run: pytest -q

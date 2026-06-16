@@ -77,6 +77,16 @@ adds first-class **HPC scalability** and **VAMP-2 feature optimisation**.
   whole feature types (`distances` / `fitted_coords` / `phi_psi`) by VAMP-2 and
   switches the loop to the best one (re-running column selection on a change).
 
+#### End-user input file & tutorial
+- **`autosampler-init`** writes a fully-annotated starter input file
+  (`autosampler/templates.py`, mirrored to `examples/template.yaml`) covering
+  every section, method choice, and hyperparameter. Documented in
+  `docs/input_file.md`.
+- **Jupyter notebook tutorial** with rendered plots
+  (`examples/notebooks/adaptive_msm_tutorial.ipynb`): input file, VAMP-2 feature
+  selection, MSM estimation, convergence, weighted ensemble, and the analysis
+  report — all on fast synthetic data.
+
 #### Tooling & docs
 - Test suite (`pytest`) covering MSM, CV methods, execution backends, feature
   selection, config, spawners, and hardening — **49 tests**.

@@ -21,6 +21,12 @@ rewriting the whole pipeline.
 - **HPC scalability** — run on a multi-GPU workstation or dispatch walkers as
   **SLURM** / **PBS** array jobs (`execution.backend`).
 
+Get started in one command — `autosampler-init` writes an annotated input file
+covering every method, feature, and hyperparameter (see
+[`docs/input_file.md`](docs/input_file.md)). A runnable
+[notebook tutorial](examples/notebooks/adaptive_msm_tutorial.ipynb) with rendered
+plots walks through the whole workflow.
+
 See **[`docs/`](docs/index.md)** (full documentation & tutorials) and
 **[`CHANGELOG.md`](CHANGELOG.md)**. Build the docs site with
 `pip install mkdocs-material && mkdocs serve`.

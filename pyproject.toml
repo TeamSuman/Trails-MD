@@ -68,6 +68,7 @@ autosampler-run = "autosampler.cli:main"
 autosampler-path = "autosampler.path_cli:main"
 autosampler-log = "autosampler.log_cli:main"
 autosampler-analyze = "autosampler.analysis_cli:main"
+autosampler-init = "autosampler.init_cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
