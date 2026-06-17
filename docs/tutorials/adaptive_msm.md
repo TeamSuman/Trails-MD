@@ -35,10 +35,32 @@ msm:
   n_metastable: 4
   convergence_mode: all
   convergence_patience: 3
+  stable_clustering: true        # comparable microstate IDs across iterations
+  spawn_uncertainty: true        # uncertainty × leverage × flux seeding
   convergence_criteria:
     - {name: implied_timescales, params: {tol: 0.1, n_timescales: 2}}
     - {name: vamp2, params: {tol: 0.05}}
-    - {name: statistical_error, params: {tol: 0.2}}
+    - {name: transition_matrix, params: {tol: 0.2, min_flux: 1.0e-4}}
+```
+
+With `convergence_mode: all`, the run stops only when the slow kinetics have
+stabilised **and** the flux-weighted statistical uncertainty of the transition
+matrix `T_ij` has fallen below `tol` — so a plateau in timescales alone will not
+end the run while important transitions are still poorly estimated. The
+`spawn_scheme: msm` spawner above actively drives that uncertainty down by
+seeding walkers from microstates scored by **uncertainty × leverage × flux**
+(see [MSM & convergence](../msm.md)).
+
+### Adaptive binning (optional)
+
+The density / WE spawners bin the CV space on a uniform grid by default. Switch
+to landscape-adaptive bins — finer across barriers, coarser in basins,
+recomputed each iteration — with a `binning` block (see
+[Adaptive binning](../binning.md)):
+
+```yaml
+binning:
+  scheme: gradient     # uniform | gradient | mab | eigenvector
 ```
 
 Optionally enable VAMP-2 feature selection (see

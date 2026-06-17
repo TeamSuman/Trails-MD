@@ -8,7 +8,9 @@ All notable changes to AutoSampler are documented here. The format is based on
 
 This cycle turns AutoSampler from a coverage-driven adaptive sampler into an
 **MSM-convergence-driven** framework, hardens the engineering foundation, and
-adds first-class **HPC scalability** and **VAMP-2 feature optimisation**.
+adds first-class **HPC scalability** and **VAMP-2 feature optimisation**. It also
+adds a flux-weighted **transition-matrix convergence** gate with
+**uncertainty-guided spawning**, and opt-in **landscape-adaptive binning**.
 
 ### Added
 

@@ -13,8 +13,13 @@ rewriting the whole pipeline.
 ## What's new
 
 - **MSM-convergence engine** — build an MSM each iteration (deeptime) and stop
-  automatically on implied-timescale / VAMP-2 / statistical-error convergence
-  (`spawn_scheme: msm`, `msm.enabled`).
+  automatically on implied-timescale / VAMP-2 convergence *and* a flux-weighted
+  **transition-matrix** statistical-error gate (`spawn_scheme: msm`, `msm.enabled`).
+- **Uncertainty-guided spawning** — seed walkers by **uncertainty × leverage ×
+  flux** to drive the MSM toward convergence fastest (`msm.spawn_uncertainty`).
+- **Landscape-adaptive binning** — place bins finer across barriers and coarser
+  in basins (`binning.scheme: gradient | mab | eigenvector`), recomputed each
+  iteration; defaults to the uniform grid.
 - **More learned CVs** — VAMPNet and SPIB alongside TICA / TVAE / PCA / deep-TICA.
 - **VAMP-2 feature selection** — optionally select and adaptively update the
   input features that best resolve the slow dynamics (`feature_selection.enabled`).

@@ -1,15 +1,23 @@
 """Generate a structured PDF changelog for AutoSampler."""
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
+import os
+
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
-    ListFlowable, ListItem, PageBreak,
+    HRFlowable,
+    ListFlowable,
+    ListItem,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
 )
 
-import os
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "AutoSampler_Changelog.pdf")
 
 NAVY = colors.HexColor("#1A237E")
@@ -77,7 +85,7 @@ hi = Table([
     [Paragraph("Local multiprocessing only", CELL),
      Paragraph("Local + SLURM + PBS array jobs, fault-tolerant", CELL)],
     [Paragraph("No tests / CI / docs", CELL),
-     Paragraph("76 tests, CI, full docs site, notebook, PDF", CELL)],
+     Paragraph("96 tests, CI, full docs site, notebook, PDF", CELL)],
 ], colWidths=[78*mm, 92*mm])
 hi.setStyle(TableStyle([
     ("BACKGROUND", (0, 0), (-1, 0), NAVY),
@@ -90,7 +98,7 @@ hi.setStyle(TableStyle([
 story.append(hi)
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "Status: 76 automated tests passing; continuous integration green on "
+    "Status: 96 automated tests passing; continuous integration green on "
     "Python 3.10 &amp; 3.11; ruff-clean. Pull request #1 (devel &#8594; main) open.", SMALL))
 story.append(PageBreak())
 
@@ -108,10 +116,18 @@ story.append(bullets([
     "counts &#8594; MLE or Bayesian MSM &#8594; implied timescales, VAMP-2 score, "
     "PCCA+ metastable states, stationary distribution.",
     "<b>ConvergenceMonitor</b>: composable, pluggable criteria — implied-timescale "
-    "stability, VAMP-2 plateau, stationary-distribution drift, and Bayesian "
-    "statistical-error thresholds (combined with all / any + patience).",
-    "<b>MSMSpawner</b> (<font face='Courier'>spawn_scheme: msm</font>): least-counts / "
-    "MSM-uncertainty seeding that actively drives the MSM toward convergence.",
+    "stability, VAMP-2 plateau, stationary-distribution drift, Bayesian "
+    "statistical-error thresholds, and a <b>flux-weighted transition-matrix</b> "
+    "criterion (analytic Dirichlet <font face='Courier'>T<sub>ij</sub></font> "
+    "uncertainty) — combined with all / any + patience to require both kinetic "
+    "resolution and statistical convergence of the transition matrix.",
+    "<b>MSMSpawner</b> (<font face='Courier'>spawn_scheme: msm</font>): "
+    "<b>uncertainty &#215; leverage &#215; flux</b> microstate seeding "
+    "(<font face='Courier'>&#960;<sub>i</sub>&#183;|&#968;<sub>i</sub>|&#183;"
+    "&#963;<sub>out,i</sub> + &#945;/&#8730;c<sub>i</sub></font>) that throws runs "
+    "at the transitions whose in/out rates are uncertain and important; "
+    "least-counts fallback before the first MSM, with stable clustering for "
+    "comparable microstate IDs across iterations.",
 ]))
 
 story.append(Paragraph("Cutting-edge &amp; optimised collective variables", H2))
@@ -124,6 +140,26 @@ story.append(bullets([
     "best resolve the slow dynamics, via a greedy VAMP-2 optimisation protocol.",
     "<b>VAMP-2-driven adaptive retraining</b>: retrain the CV only when its score "
     "on fresh data degrades, instead of on a blind fixed schedule.",
+]))
+
+story.append(Paragraph("Landscape-adaptive binning", H2))
+story.append(Paragraph(
+    "The density / weighted-ensemble spawners stratify the CV space into bins. A "
+    "uniform grid wastes replicas in flat basins and, worse, lets walkers slide "
+    "back across a wide bin at a barrier before the lag time elapses — stalling "
+    "the flux. The new <b>autosampler/binning/adaptive.py</b> makes bins "
+    "landscape-adaptive, recomputed every iteration (selected by "
+    "<font face='Courier'>binning.scheme</font>; opt-in, default "
+    "<font face='Courier'>uniform</font>).", BODY))
+story.append(bullets([
+    "<b>gradient</b>: equi-resistance edges (<font face='Courier'>&#8747; exp(&#946;F) "
+    "&#8733; &#8747; 1/P</font>) place boundaries where the sampled density is low "
+    "— fine across barriers, coarse in basins.",
+    "<b>mab</b>: Minimal-Adaptive-Binning-style uniform bins between the occupied "
+    "extremes plus narrow foothold bins at the moving fronts.",
+    "<b>eigenvector</b>: bin uniformly along the leading (slowest) CV coordinate "
+    "only — a committor proxy that is automatically fine at the barrier and folds "
+    "many CVs into one coordinate.",
 ]))
 
 story.append(Paragraph("Scalability: workstation and HPC", H2))
@@ -159,7 +195,12 @@ rule()
 sections = [
     ("Sampling &amp; convergence", [
         "New MSM subsystem (estimator, diagnostics, convergence monitor).",
-        "MSM least-counts spawner and weighted-ensemble spawner.",
+        "Flux-weighted transition-matrix convergence criterion (analytic Dirichlet "
+        "error on T_ij) that augments the spectral criteria under mode: all.",
+        "Uncertainty &#215; leverage &#215; flux MSM spawner (least-counts "
+        "fallback) and weighted-ensemble spawner.",
+        "Landscape-adaptive binning (gradient / mab / eigenvector) for the density "
+        "and weighted-ensemble spawners; opt-in, recomputed each iteration.",
         "Convergence now based on MSM kinetics, not just spatial coverage "
         "(legacy occupancy criterion retained as one selectable option).",
     ]),
@@ -184,7 +225,7 @@ sections = [
         "MD subprocess timeouts; trajectory-file validation; portable temp paths; "
         "narrower exception handling; removed dead code.",
         "Deterministic seeding across NumPy, PyTorch, and Lightning.",
-        "Test suite (76 tests), GitHub Actions CI, ruff/black/isort, pre-commit, "
+        "Test suite (96 tests), GitHub Actions CI, ruff/black/isort, pre-commit, "
         "and contribution guidelines.",
     ]),
     ("Analysis &amp; usability", [
@@ -206,7 +247,7 @@ rule()
 rows = [
     ["Capability", "Original v2.0.0", "New (devel)"],
     ["Convergence", "Bin-occupancy saturation",
-     "MSM: implied timescales, VAMP-2, statistical error"],
+     "MSM: timescales, VAMP-2, T_ij flux-weighted error"],
     ["MSM building", "None", "Full pipeline + Bayesian errors + PCCA+"],
     ["CV methods", "fixed, PCA, TICA, TVAE, deep-TICA",
      "+ VAMPNet, SPIB, deep-LDA (unified registry)"],
@@ -214,7 +255,9 @@ rows = [
      "VAMP-2 selection &amp; optimisation, adaptive"],
     ["CV retraining", "Fixed schedule", "Fixed or VAMP-2-adaptive"],
     ["Spawning", "density, voronoi, lof, fps",
-     "+ msm (least-counts), we (weighted ensemble)"],
+     "+ msm (uncertainty&#215;leverage&#215;flux), we (weighted ensemble)"],
+    ["Binning", "Uniform grid only",
+     "+ gradient / mab / eigenvector (landscape-adaptive)"],
     ["Execution", "Local multiprocessing",
      "Local + SLURM + PBS array jobs, resubmission"],
     ["Weighted ensemble", "Placeholder stub (no-op)",
@@ -223,7 +266,7 @@ rows = [
      "autosampler-analyze: ITS, VAMP-2, FES, network"],
     ["Input file", "YAML (sparse examples)",
      "autosampler-init annotated template + docs"],
-    ["Tests / CI", "None", "76 tests, CI (3.10 &amp; 3.11), ruff"],
+    ["Tests / CI", "None", "96 tests, CI (3.10 &amp; 3.11), ruff"],
     ["Docs / tutorials", "README only",
      "MkDocs site, notebook tutorial, changelog PDF"],
 ]
@@ -245,7 +288,67 @@ story.append(Paragraph(
     "<b>Compatibility:</b> every new capability is opt-in. A v2.0.0 input file "
     "runs unchanged; advanced blocks (msm, feature_selection, execution, retrain "
     "policy) are simply omitted by default.", SMALL))
-story.append(Spacer(1, 6))
+story.append(PageBreak())
+
+# ---------------- New configuration options ----------------
+story.append(Paragraph("4. New configuration options", H1))
+rule()
+story.append(Paragraph(
+    "Every option below is optional; omitting the block keeps the previous "
+    "behaviour. See the configuration reference and per-topic docs pages.", BODY))
+opt_rows = [
+    ["Block", "Key", "Default", "What it does"],
+    ["msm", "convergence_criteria: transition_matrix", "—",
+     "Flux-weighted Dirichlet uncertainty gate on T_ij (params: tol, min_flux)."],
+    ["msm", "stable_clustering", "false",
+     "Seed clustering from previous centres so microstate IDs / T_ij stay comparable."],
+    ["msm", "spawn_uncertainty", "true",
+     "Weight msm spawning by outflow uncertainty (× leverage × flux)."],
+    ["msm", "spawn_leverage", "1",
+     "Number of slow eigenvectors used for the leverage factor."],
+    ["msm", "spawn_alpha", "1.0",
+     "Weight of the least-counts exploration term in msm spawning."],
+    ["binning", "scheme", "uniform",
+     "uniform | gradient | mab | eigenvector — landscape-adaptive bin placement."],
+    ["binning", "n_fine", "100",
+     "Density-histogram resolution for the gradient scheme."],
+    ["binning", "smoothing", "3",
+     "Density smoothing window for the gradient scheme."],
+]
+opt_data = [[Paragraph(c, CELLH if i == 0 else CELL) for c in r]
+            for i, r in enumerate(opt_rows)]
+opt = Table(opt_data, colWidths=[20*mm, 50*mm, 16*mm, 84*mm], repeatRows=1)
+opt.setStyle(TableStyle([
+    ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LGREY]),
+    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B0BEC5")),
+    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ("FONTNAME", (1, 1), (1, -1), "Courier"),
+    ("FONTSIZE", (1, 1), (1, -1), 7.8),
+    ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+    ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ("TEXTCOLOR", (0, 1), (0, -1), INDIGO),
+]))
+story.append(opt)
+story.append(Spacer(1, 8))
+story.append(Paragraph(
+    "Example — drive convergence with the transition-matrix gate and adaptive bins:",
+    SMALL))
+code = ParagraphStyle("Code", parent=SMALL, fontName="Courier", fontSize=8,
+                      backColor=LGREY, leading=11, leftIndent=6, spaceBefore=2)
+for line in [
+    "msm:",
+    "&nbsp;&nbsp;enabled: true",
+    "&nbsp;&nbsp;stable_clustering: true",
+    "&nbsp;&nbsp;convergence_mode: all",
+    "&nbsp;&nbsp;convergence_criteria:",
+    "&nbsp;&nbsp;&nbsp;&nbsp;- {name: vamp2, params: {tol: 0.05}}",
+    "&nbsp;&nbsp;&nbsp;&nbsp;- {name: transition_matrix, params: {tol: 0.2, min_flux: 1.0e-4}}",
+    "binning:",
+    "&nbsp;&nbsp;scheme: gradient",
+]:
+    story.append(Paragraph(line, code))
+story.append(Spacer(1, 8))
 story.append(Paragraph(
     "Generated for the AutoSampler devel branch. See CHANGELOG.md and the "
     "documentation for full details.", SMALL))
