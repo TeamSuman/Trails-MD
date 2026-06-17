@@ -20,10 +20,16 @@ adds first-class **HPC scalability** and **VAMP-2 feature optimisation**.
   - `diagnostics.py` — serialisable implied-timescale / Chapman-Kolmogorov /
     VAMP results.
   - `ConvergenceMonitor` with composable, pluggable criteria: implied-timescale
-    stability, VAMP-2 plateau, stationary-distribution drift, and Bayesian
-    statistical-error thresholds (combined with `all` / `any` + patience).
-- `MSMSpawner` (`spawn_scheme: msm`) — least-counts / MSM-uncertainty restart
-  seeding that drives the MSM toward convergence on its slow processes.
+    stability, VAMP-2 plateau, stationary-distribution drift, Bayesian
+    statistical-error thresholds, and a **flux-weighted transition-matrix**
+    criterion (analytic Dirichlet `T_ij` uncertainty) — combined with
+    `all` / `any` + patience.
+- `MSMSpawner` (`spawn_scheme: msm`) — **uncertainty × leverage × flux**
+  microstate seeding (`π_i · |ψ_i| · σ_out,i + α/√c_i`) on the estimator's shared
+  clustering, throwing runs at the transitions whose in/out rates are uncertain
+  and important; least-counts fallback before the first MSM. Knobs
+  `msm.spawn_alpha` / `spawn_leverage` / `spawn_uncertainty`; `msm.stable_clustering`
+  keeps microstate IDs comparable across iterations.
 - **Weighted-ensemble resampling** — a real `WeightedEnsemble` split/merge core
   (Huber & Kim, weight-conserving) and `WESpawner` (`spawn_scheme: we`,
   `we_target_per_bin`), replacing the former placeholder.

@@ -18,6 +18,7 @@ from .convergence import (
     ImpliedTimescaleCriterion,
     StationaryDistributionCriterion,
     StatisticalErrorCriterion,
+    TransitionMatrixCriterion,
     VAMP2Criterion,
     build_criterion,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "VAMP2Criterion",
     "StationaryDistributionCriterion",
     "StatisticalErrorCriterion",
+    "TransitionMatrixCriterion",
     "build_criterion",
 ]
 

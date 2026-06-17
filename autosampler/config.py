@@ -162,6 +162,13 @@ class MSMConfig(BaseModel):
     n_bayesian_samples: int = 50
     n_timescales: int = 3
     n_metastable: Optional[int] = None
+    # Keep microstate IDs comparable across iterations (seeds k-means from the
+    # previous centres) — needed for transition-matrix convergence / spawning.
+    stable_clustering: bool = False
+    # MSM-guided spawner (spawn_scheme: msm) knobs.
+    spawn_alpha: float = 1.0  # weight of the least-counts/exploration term
+    spawn_leverage: int = 1  # slow eigenvectors used for the leverage factor
+    spawn_uncertainty: bool = True  # include the outflow-uncertainty factor
     # Convergence: list of {name, params} criteria combined with all/any.
     convergence_criteria: List[Dict[str, Any]] = Field(
         default_factory=lambda: [

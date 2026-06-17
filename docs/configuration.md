@@ -92,7 +92,9 @@ Markov State Model estimation and convergence (opt-in). See [MSM](msm.md).
 | `n_microstates` / `cluster_method` | `100` / `kmeans` | Discretisation. |
 | `estimator` | `mle` | `mle` or `bayesian` (error bars). |
 | `n_timescales` / `n_metastable` | `3` / `None` | Slow processes / PCCA+ states. |
-| `convergence_criteria` | ITS + VAMP-2 | List of `{name, params}`. |
+| `stable_clustering` | `false` | Seed k-means from previous centres (comparable `T_ij` / microstate IDs across iterations). |
+| `spawn_alpha` / `spawn_leverage` / `spawn_uncertainty` | `1.0` / `1` / `true` | MSM-guided spawner: exploration weight / # slow eigenvectors for leverage / include outflow uncertainty. |
+| `convergence_criteria` | ITS + VAMP-2 | List of `{name, params}`; add `transition_matrix` for flux-weighted `T_ij` convergence. |
 | `convergence_mode` / `convergence_patience` | `all` / `2` | Combine criteria / patience. |
 
 ## `execution`

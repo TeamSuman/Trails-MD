@@ -77,6 +77,9 @@ class AutoSamplerCore:
             grid_size=self.config.spawning.voronoi_grid_size,
             n_neighbors=self.config.spawning.lof_neighbors,
             target_per_bin=self.config.spawning.we_target_per_bin,
+            alpha=self.config.msm.spawn_alpha,
+            leverage=self.config.msm.spawn_leverage,
+            uncertainty=self.config.msm.spawn_uncertainty,
             seed=self.config.random_seed,
         )
 
@@ -140,6 +143,7 @@ class AutoSamplerCore:
                 n_timescales=msm_cfg.n_timescales,
                 lagtimes=msm_cfg.lagtimes,
                 n_bayesian_samples=msm_cfg.n_bayesian_samples,
+                stable_clustering=getattr(msm_cfg, "stable_clustering", False),
                 seed=self.config.random_seed,
             )
             self.msm_monitor = build_monitor_from_config(msm_cfg)
@@ -448,6 +452,14 @@ class AutoSamplerCore:
             walker_parents=self.walker_parents,
             expected_frames=expected_frames,
         )
+        # Hand the MSM-guided spawner the previous iteration's MSM + its clustering
+        # (consistent with each other; the spawner falls back to least-counts when
+        # either is None, e.g. iteration 0 or just after a resume).
+        if hasattr(self.spawner, "msm_result"):
+            self.spawner.msm_result = self.last_msm_result
+            self.spawner.cluster_model = getattr(
+                self.msm_estimator, "_cluster_model", None
+            )
         spawn_indices = self.spawner.sample(
             points, self.config.spawning.walker, history=self.history
         )
@@ -979,6 +991,10 @@ class AutoSamplerCore:
                 arrays["metastable_populations"] = np.asarray(
                     result.metastable_populations, dtype=float
                 )
+            if getattr(result, "count_matrix", None) is not None:
+                arrays["count_matrix"] = np.asarray(result.count_matrix, dtype=float)
+            if getattr(result, "eigenvectors", None) is not None:
+                arrays["eigenvectors"] = np.asarray(result.eigenvectors, dtype=float)
             its = getattr(result, "its", None)
             if its is not None:
                 arrays["its_lagtimes"] = np.asarray(its.lagtimes, dtype=float)

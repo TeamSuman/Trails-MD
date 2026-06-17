@@ -178,11 +178,62 @@ class StatisticalErrorCriterion(ConvergenceCriterion):
         )
 
 
+class TransitionMatrixCriterion(ConvergenceCriterion):
+    """Satisfied when every *significant* transition probability is well determined.
+
+    Uses the connected count matrix to get an analytic Dirichlet uncertainty on
+    each transition probability, ``σ(T_ij) = sqrt(T_ij(1−T_ij)/(c_i+1))`` (no
+    bootstrap). The test passes when the largest **flux-weighted** relative
+    uncertainty over significant transitions is below ``tol``:
+    ``max_{(i,j): π_i T_ij > min_flux·max} σ(T_ij)/T_ij < tol``. Flux weighting
+    avoids being dominated by noise in tiny, irrelevant entries. This is a
+    within-iteration *absolute* statistical-convergence test; combine it with the
+    spectral criteria under ``mode: all`` to require both kinetic resolution and
+    statistical convergence of the microstate transition matrix.
+
+    Requires ``count_matrix`` on the result (always populated by MSMEstimator).
+    """
+
+    name = "transition_matrix"
+
+    def __init__(self, tol: float = 0.2, min_flux: float = 1e-4) -> None:
+        self.tol = float(tol)
+        self.min_flux = float(min_flux)
+
+    def update(self, result: MSMResult) -> CriterionStatus:
+        T = result.transition_matrix
+        pi = result.stationary_distribution
+        C = result.count_matrix
+        if T is None or pi is None or C is None:
+            return CriterionStatus(
+                self.name, False, None, "needs count_matrix (MSM not built yet)"
+            )
+        T = np.asarray(T, dtype=float)
+        pi = np.asarray(pi, dtype=float)
+        counts = np.asarray(C, dtype=float).sum(axis=1)  # row counts c_i
+        var = T * (1.0 - T) / (counts[:, None] + 1.0)  # Dirichlet element variance
+        sigma = np.sqrt(np.clip(var, 0.0, None))
+        flux = pi[:, None] * T
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rel = np.where(T > 0, sigma / T, 0.0)
+        fmax = float(flux.max()) if flux.size else 0.0
+        mask = flux > (self.min_flux * fmax if fmax > 0 else self.min_flux)
+        metric = float(np.max(rel[mask])) if np.any(mask) else 0.0
+        satisfied = metric < self.tol
+        return CriterionStatus(
+            self.name,
+            satisfied,
+            metric,
+            f"max flux-weighted rel. error {metric:.3f} (tol {self.tol})",
+        )
+
+
 _CRITERION_REGISTRY = {
     ImpliedTimescaleCriterion.name: ImpliedTimescaleCriterion,
     VAMP2Criterion.name: VAMP2Criterion,
     StationaryDistributionCriterion.name: StationaryDistributionCriterion,
     StatisticalErrorCriterion.name: StatisticalErrorCriterion,
+    TransitionMatrixCriterion.name: TransitionMatrixCriterion,
 }
 
 

@@ -109,6 +109,11 @@ msm:
   estimator: mle                        # mle | bayesian (error bars)
   n_timescales: 3
   n_metastable: 4                       # PCCA+ coarse-graining
+  stable_clustering: false              # comparable microstate IDs / T_ij across iters
+  # MSM-guided spawner (spawn_scheme: msm): uncertainty x leverage x flux
+  spawn_alpha: 1.0                      # exploration / least-counts weight
+  spawn_leverage: 1                     # slow eigenvectors used for leverage
+  spawn_uncertainty: true               # include outflow-uncertainty factor
   convergence_mode: all                 # all | any
   convergence_patience: 3
   convergence_criteria:
@@ -116,6 +121,8 @@ msm:
       params: {tol: 0.1, n_timescales: 2}
     - name: vamp2
       params: {tol: 0.05}
+    # - name: transition_matrix          # flux-weighted T_ij statistical convergence
+    #   params: {tol: 0.2, min_flux: 1.0e-3}
     # - name: statistical_error          # needs estimator: bayesian
     #   params: {tol: 0.2}
 

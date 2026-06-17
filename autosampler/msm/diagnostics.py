@@ -80,6 +80,13 @@ class MSMResult:
     its: ITSResult | None = None
     # Bayesian statistical errors on the slowest timescales (std over posterior).
     timescale_errors: np.ndarray | None = None
+    # Connected-set count matrix C_ij (for Dirichlet transition-prob uncertainty).
+    count_matrix: np.ndarray | None = None
+    # Right eigenvectors of the slow processes, shape (n_active, k) (ψ₂..).
+    eigenvectors: np.ndarray | None = None
+    # Original cluster ids retained in the connected set; maps cluster id ->
+    # active-state index for MSM-guided spawning on the shared clustering.
+    state_symbols: np.ndarray | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -102,6 +109,9 @@ class MSMResult:
             "metastable_assignments",
             "metastable_populations",
             "timescale_errors",
+            "count_matrix",
+            "eigenvectors",
+            "state_symbols",
         ):
             value = getattr(self, key)
             data[key] = None if value is None else np.asarray(value).tolist()
@@ -125,6 +135,9 @@ class MSMResult:
             "metastable_assignments",
             "metastable_populations",
             "timescale_errors",
+            "count_matrix",
+            "eigenvectors",
+            "state_symbols",
         ):
             value = data.get(key)
             data[key] = None if value is None else _to_array(value)

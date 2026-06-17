@@ -95,6 +95,7 @@ class MSMEstimator:
         lagtimes: Sequence[int] | None = None,
         n_bayesian_samples: int = 50,
         regspace_dmin: float | None = None,
+        stable_clustering: bool = False,
         seed: int = 42,
         **_: Any,
     ) -> None:
@@ -107,6 +108,7 @@ class MSMEstimator:
         self.lagtimes = [int(lt) for lt in lagtimes] if lagtimes else None
         self.n_bayesian_samples = int(n_bayesian_samples)
         self.regspace_dmin = regspace_dmin
+        self.stable_clustering = bool(stable_clustering)
         self.seed = int(seed)
 
         if self.lagtime <= 0:
@@ -138,11 +140,19 @@ class MSMEstimator:
         if self.cluster_method == "kmeans":
             from deeptime.clustering import KMeans
 
+            kmeans_kwargs: dict[str, Any] = {}
+            # Stable clustering: seed from the previous centres so microstate IDs
+            # stay comparable across iterations (needed for T_ij convergence and
+            # MSM-guided spawning on a shared clustering).
+            prev = getattr(self._cluster_model, "cluster_centers", None)
+            if self.stable_clustering and prev is not None and len(prev) == n_clusters:
+                kmeans_kwargs["initial_centers"] = np.asarray(prev, dtype=float)
             estimator = KMeans(
                 n_clusters=n_clusters,
                 max_iter=200,
                 fixed_seed=self.seed,
                 progress=None,
+                **kmeans_kwargs,
             )
             self._cluster_model = estimator.fit_fetch(stacked)
         else:  # regspace
@@ -206,6 +216,11 @@ class MSMEstimator:
         vamp2 = self._safe_score(msm, dtrajs)
         n_meta, meta_assign, meta_pop = self._pcca(msm)
 
+        # Transition-matrix uncertainty / leverage inputs (best-effort).
+        count_matrix = self._safe_count_matrix(connected)
+        state_symbols = self._safe_state_symbols(connected)
+        eigenvectors = self._safe_eigenvectors(msm, k)
+
         its = None
         if self.lagtimes:
             its = self.implied_timescales(dtrajs, self.lagtimes)
@@ -227,6 +242,9 @@ class MSMEstimator:
             metastable_populations=meta_pop,
             its=its,
             timescale_errors=timescale_errors,
+            count_matrix=count_matrix,
+            eigenvectors=eigenvectors,
+            state_symbols=state_symbols,
         )
 
     def implied_timescales(
@@ -275,6 +293,32 @@ class MSMEstimator:
             logger.debug("Bayesian timescale error estimation failed: %s", exc)
             errors = None
         return prior, errors
+
+    @staticmethod
+    def _safe_count_matrix(connected) -> np.ndarray | None:
+        try:
+            return np.asarray(connected.count_matrix, dtype=float)
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            logger.debug("count_matrix unavailable: %s", exc)
+            return None
+
+    @staticmethod
+    def _safe_state_symbols(connected) -> np.ndarray | None:
+        try:
+            return np.asarray(connected.state_symbols, dtype=int)
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            logger.debug("state_symbols unavailable: %s", exc)
+            return None
+
+    @staticmethod
+    def _safe_eigenvectors(msm, k: int) -> np.ndarray | None:
+        """Right eigenvectors of the k slowest processes (skip the stationary ψ₁)."""
+        try:
+            vecs = np.asarray(msm.eigenvectors_right(k + 1), dtype=float)
+            return vecs[:, 1:] if vecs.ndim == 2 and vecs.shape[1] > 1 else None
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            logger.debug("eigenvectors unavailable: %s", exc)
+            return None
 
     @staticmethod
     def _safe_score(msm, dtrajs) -> float | None:

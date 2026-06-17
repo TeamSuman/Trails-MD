@@ -30,6 +30,7 @@ chosen combination holds for `convergence_patience` consecutive iterations.
 | `vamp2` | The VAMP-2 score change falls below `tol`. |
 | `stationary_distribution` | The stationary distribution drift (L1/KL) falls below `tol`. |
 | `statistical_error` | The Bayesian relative error on the slow timescales falls below `tol`. |
+| `transition_matrix` | The largest **flux-weighted** relative uncertainty of the microstate transition probabilities falls below `tol` (analytic Dirichlet error; `min_flux` ignores negligible transitions). Combine under `mode: all` with a spectral criterion to require *both* kinetic resolution and statistical convergence of `T_ij`. |
 
 ```yaml
 msm:
@@ -59,8 +60,25 @@ statistical uncertainty, reducing the error on the slow processes fastest.
 ```yaml
 spawning:
   spawn_scheme: msm
-  voronoi_clusters: 100      # microstate count used by the spawner
+  voronoi_clusters: 100      # microstate count for the least-counts fallback
+msm:
+  enabled: true
+  stable_clustering: true    # keep microstate IDs comparable across iterations
+  spawn_alpha: 1.0           # weight of the exploration / least-counts term
+  spawn_leverage: 1          # # slow eigenvectors used for the leverage factor
+  spawn_uncertainty: true    # include the outflow-uncertainty factor
 ```
+
+When the MSM is available, the spawner scores each microstate by
+**uncertainty × leverage × flux**: `π_i · |ψ_i| · (σ_out,i / mean) + α/√c_i` —
+its stationary flux, its amplitude on the slow eigenvectors (leverage), and the
+Dirichlet statistical uncertainty of its outgoing transitions, plus a
+least-counts exploration term. New / disconnected microstates receive the
+exploration weight so they get connected. Before the first MSM is built (or right
+after a resume) it falls back to plain least-counts. With large `spawn_alpha` (or
+`spawn_uncertainty: false`) it reduces to least-counts. `stable_clustering` seeds
+each k-means from the previous centres so `T_ij` and microstate IDs stay
+comparable across iterations.
 
 ## Practical notes
 
