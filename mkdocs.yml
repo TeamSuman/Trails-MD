@@ -19,6 +19,7 @@ nav:
   - Collective variables: cv_methods.md
   - Feature selection (VAMP-2): feature_selection.md
   - MSM & convergence: msm.md
+  - Adaptive binning: binning.md
   - Analysis & plotting: analysis.md
   - Execution (workstation & HPC): execution.md
   - Tutorial — adaptive MSM: tutorials/adaptive_msm.md

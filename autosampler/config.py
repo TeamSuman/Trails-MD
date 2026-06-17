@@ -306,11 +306,33 @@ class ExecutionConfig(BaseModel):
         return value
 
 
+class BinningConfig(BaseModel):
+    """Landscape-adaptive binning for the density / weighted-ensemble spawners.
+
+    ``uniform`` (default) is the constant-width grid (backward-compatible). The
+    adaptive schemes make bins finer in steep / low-density regions (barriers) and
+    coarser in flat basins, recomputed every iteration.
+    """
+
+    scheme: str = "uniform"  # uniform | gradient | mab | eigenvector
+    n_fine: int = 100  # histogram resolution for the gradient scheme
+    smoothing: int = 3  # density smoothing window for the gradient scheme
+
+    @field_validator("scheme")
+    @classmethod
+    def _scheme(cls, value: str) -> str:
+        valid = {"uniform", "gradient", "mab", "eigenvector"}
+        if value not in valid:
+            raise ValueError(f"binning.scheme must be one of {sorted(valid)}")
+        return value
+
+
 class AutoSamplerConfig(BaseModel):
     system: SystemConfig
     engine: EngineConfig
     spawning: SpawningConfig
     msm: MSMConfig = Field(default_factory=MSMConfig)
+    binning: BinningConfig = Field(default_factory=BinningConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     feature_selection: FeatureSelectionConfig = Field(
         default_factory=FeatureSelectionConfig

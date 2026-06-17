@@ -97,6 +97,17 @@ Markov State Model estimation and convergence (opt-in). See [MSM](msm.md).
 | `convergence_criteria` | ITS + VAMP-2 | List of `{name, params}`; add `transition_matrix` for flux-weighted `T_ij` convergence. |
 | `convergence_mode` / `convergence_patience` | `all` / `2` | Combine criteria / patience. |
 
+## `binning`
+
+Landscape-adaptive binning for the density / WE spawners. See [Adaptive
+binning](binning.md).
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `scheme` | `uniform` | `uniform` \| `gradient` \| `mab` \| `eigenvector`. |
+| `n_fine` | `100` | Density-histogram resolution (gradient scheme). |
+| `smoothing` | `3` | Density smoothing window (gradient scheme). |
+
 ## `execution`
 
 Where walkers run (workstation vs HPC). See [Execution](execution.md).

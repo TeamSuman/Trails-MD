@@ -71,6 +71,14 @@ adds first-class **HPC scalability** and **VAMP-2 feature optimisation**.
 - `FeatureSelectionConfig` (`feature_selection.enabled`, opt-in) — re-selects
   feature columns every `cadence` iterations; selection persisted for resume.
 
+#### Landscape-adaptive binning
+- `autosampler/binning/adaptive.py` — `AdaptiveBinner` + `BinnerFactory` with
+  `gradient` (equi-resistance: fine bins where the density is low / barriers),
+  `mab` (Minimal-Adaptive-Binning style front footholds), and `eigenvector` (bin
+  along the leading slow CV coordinate) schemes alongside `uniform`. Selected via
+  `binning.scheme`; wired into the density and weighted-ensemble spawners; opt-in,
+  default `uniform` reproduces the constant-width grid exactly.
+
 #### Adaptive CV quality & reproducibility (Phase 4)
 - **VAMP-2-driven adaptive retraining** (`retrain_policy: vamp_adaptive`):
   `RetrainController` retrains the CV only when its VAMP-2 score on fresh data

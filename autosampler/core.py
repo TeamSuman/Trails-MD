@@ -83,6 +83,28 @@ class AutoSamplerCore:
             seed=self.config.random_seed,
         )
 
+        # Landscape-adaptive binning (opt-in via config.binning.scheme); supplied
+        # to the density / WE spawners. `uniform` leaves the spawners on the grid.
+        binning_cfg = getattr(self.config, "binning", None)
+        if (
+            binning_cfg is not None
+            and binning_cfg.scheme != "uniform"
+            and hasattr(self.spawner, "binner")
+        ):
+            from autosampler.binning.adaptive import make_binner
+
+            self.spawner.binner = make_binner(
+                binning_cfg.scheme,
+                n_bins=self.config.n_bins,
+                min_values=None if is_adaptive else self.config.min_values,
+                max_values=None if is_adaptive else self.config.max_values,
+                target=self.config.spawning.target
+                if self.config.spawning.search_mode == "target"
+                else None,
+                n_fine=binning_cfg.n_fine,
+                smoothing=binning_cfg.smoothing,
+            )
+
         # State variables
         self.iteration = 0
         self.history = {}

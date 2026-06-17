@@ -116,6 +116,12 @@ msm:
     # - name: statistical_error          # needs estimator: bayesian
     #   params: {tol: 0.2}
 
+# ---- Binning: landscape-adaptive stratification for density / WE spawners ---
+binning:
+  scheme: uniform            # uniform | gradient | mab | eigenvector
+  # n_fine: 100              # density-histogram resolution (gradient scheme)
+  # smoothing: 3             # density smoothing window (gradient scheme)
+
 # ---- Execution: where walkers run ------------------------------------------
 execution:
   backend: local                        # local | slurm | pbs

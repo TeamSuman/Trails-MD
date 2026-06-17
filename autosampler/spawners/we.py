@@ -40,6 +40,8 @@ class WESpawner(Spawner):
         self.we = WeightedEnsemble(target_per_bin=target_per_bin)
         self.seed = int(seed)
         self.weights: np.ndarray | None = None  # aligned to cumulative cloud
+        # Optional landscape-adaptive binner (set by the orchestrator); None -> grid.
+        self.binner = None
 
     def sample(
         self, points: np.ndarray, top_n: int, history: dict[int, Any] | None = None
@@ -81,10 +83,15 @@ class WESpawner(Spawner):
         return weights / total if total > 0 else np.full(n, 1.0 / n)
 
     def _bin_labels(self, cumulative: np.ndarray) -> np.ndarray:
-        binner = RegularBinner(
-            n_bins=self.n_bins, min_values=self.min_values, max_values=self.max_values
-        )
-        table = binner.fit(cumulative)
+        if self.binner is not None:
+            self.binner.n_bins = np.asarray(self.n_bins, dtype=int)
+            table = self.binner.fit(cumulative)
+        else:
+            table = RegularBinner(
+                n_bins=self.n_bins,
+                min_values=self.min_values,
+                max_values=self.max_values,
+            ).fit(cumulative)
         labels = np.full(len(cumulative), -1, dtype=int)
         for row, frames in enumerate(table.populated_data):
             for frame in frames:
