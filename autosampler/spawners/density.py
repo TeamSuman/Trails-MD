@@ -124,7 +124,11 @@ def _weighted_choice(rows: np.ndarray, weights: np.ndarray, top_n: int) -> np.nd
     if weights.sum() <= 0:
         weights = np.ones_like(weights, dtype=float)
     weights = weights / weights.sum()
-    replace = len(rows) < top_n
+    # replace must be True when fewer than top_n entries have nonzero probability,
+    # otherwise np.random.choice raises "fewer non-zero entries in p than size"
+    # (common in target mode, where target_closeness zeroes out most bins).
+    n_nonzero = int(np.count_nonzero(weights))
+    replace = len(rows) < top_n or n_nonzero < top_n
     return np.random.choice(rows, size=top_n, replace=replace, p=weights).astype(int)
 
 

@@ -310,15 +310,15 @@ class AdaptiveSpaceModel:
                 mean, _ = self.fitted(tensor)
                 projected = mean.detach().cpu().numpy()
         elif self.type == "deep-tica":
+            try:
+                device = next(self.model.parameters()).device
+            except (StopIteration, AttributeError):
+                device = torch.device("cpu")
             tensor = torch.as_tensor(
-                self._torch_features(scaled), dtype=torch.float32
+                self._torch_features(scaled), dtype=torch.float32, device=device
             )
             with torch.no_grad():
-                projected = (
-                    self.model(tensor)
-                    .detach()
-                    .numpy()
-                )
+                projected = self.model(tensor).detach().cpu().numpy()
         elif self.type == "pca":
             projected = self.model.transform(scaled)
         elif self.type == "tica":
