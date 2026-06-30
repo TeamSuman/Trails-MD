@@ -1,0 +1,43 @@
+# PBS/Torque HPC execution: one array job per iteration. See docs/execution.md.
+system:
+  conf_file: aib9_equilibrated.pdb
+  top_file: aib9_equilibrated.pdb
+  topology: charmm
+  system_file: system.py
+  trajectory_topology_file: aib9_equilibrated.pdb
+  feature_selection: "resname AIB and name N CA C O CB1 CB2"
+
+engine:
+  md_engine: openmm
+  platform_name: CUDA          # use CPU if no GPU (slower)
+  precision: mixed
+  npt: true
+  temperature: 400.0
+  dt: 0.002
+
+spawning:
+  spawn_scheme: density
+  search_mode: explore
+  walker: 32
+  step: 5000
+  stride: 50
+
+space_mode: tica
+adaptive_feature_type: distances
+retrain_freq: 5
+
+execution:
+  backend: pbs
+  partition: gpu               # PBS queue
+  walltime: "02:00:00"
+  cpus_per_task: 8
+  gpus_per_task: 1
+  memory: "16G"
+  max_retries: 2
+  module_loads:
+    - "module load cuda/12.2"
+
+outdir: runs/aib9_pbs
+random_seed: 7
+checkpoint_freq: 1
+n_bins: [30, 30]

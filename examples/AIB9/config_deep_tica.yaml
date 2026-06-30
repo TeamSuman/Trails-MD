@@ -1,0 +1,41 @@
+# deep-TICA collective variable on AIB9 (requires: pip install '.[deep-tica]').
+system:
+  conf_file: aib9_equilibrated.pdb
+  top_file: aib9_equilibrated.pdb
+  topology: charmm
+  system_file: system.py
+  trajectory_topology_file: aib9_equilibrated.pdb
+  feature_selection: "resname AIB and name N CA C O CB1 CB2"
+
+engine:
+  md_engine: openmm
+  platform_name: CUDA          # use CPU if no GPU (slower)
+  precision: mixed
+  npt: true
+  temperature: 400.0
+  dt: 0.002
+
+spawning:
+  spawn_scheme: density
+  search_mode: explore
+  walker: 10
+  step: 5000
+  stride: 50
+  max_workers: 1
+
+space_mode: deep-tica
+adaptive_feature_type: distances
+retrain_freq: 5
+aggregate_memory: true
+max_adaptive_memory_frames: 5000
+adaptive_model:
+  lagtime: 5
+  latent_dim: 2
+  epochs: 50
+  deep_tica_hidden_dims: [64, 32]
+
+outdir: runs/aib9_deep_tica
+random_seed: 7
+checkpoint_freq: 1
+save_features: true
+n_bins: [30, 30]

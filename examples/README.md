@@ -32,6 +32,11 @@ autosampler --config examples/alanine_dipeptide/config.yaml --iterations 5
 | `AIB9/config_adaptive.yaml` | Learned CV (TVAE) | GPU recommended |
 | `AIB9/config_msm_vampnet.yaml` | VAMPNet CV + MSM convergence + MSM spawning + gradient binning | GPU recommended; `pip install '.[deep-tica]'` |
 | `AIB9/config_msm_feature_selection.yaml` | VAMP-2 feature selection + MSM | GPU recommended |
+| `AIB9/config_spib.yaml` | SPIB learned CV | GPU recommended |
+| `AIB9/config_deep_tica.yaml` | deep-TICA learned CV | GPU recommended; `pip install '.[deep-tica]'` |
+| `AIB9/config_we.yaml` | Weighted-ensemble (WE) spawner | GPU recommended |
+| `AIB9/config_target.yaml` | Target-mode search toward a CV point | GPU recommended |
+| `AIB9/config_pbs.yaml` | PBS/Torque HPC backend (array job per iteration) | A PBS cluster |
 | `AIB9/config_tda_phi_sweep.yaml` | TDA phi sweep | Needs external Zenodo assets (see the config header) |
 
 ## Alanine dipeptide (GROMACS topology via OpenMM)
