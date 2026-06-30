@@ -72,7 +72,21 @@ def _execution_slots(
 
 def _run_one(task: WalkerTask, device_index: int) -> bool:
     task.device_index = device_index
-    return run_walker_task(task)
+    # A single walker's failure (CUDA error, NaN blow-up, missing file, …) must
+    # not abort the whole iteration — mirror the scheduler path (run_task.py),
+    # which reports failures as success=False rather than raising.
+    try:
+        return run_walker_task(task)
+    except Exception:  # noqa: BLE001 - report failure, keep the batch alive
+        import logging
+        import traceback
+
+        logging.error(
+            "Walker %s failed; marking it unsuccessful and continuing:\n%s",
+            getattr(task, "index", "?"),
+            traceback.format_exc(),
+        )
+        return False
 
 
 class LocalProcessBackend(ExecutionBackend):
@@ -118,7 +132,17 @@ class LocalProcessBackend(ExecutionBackend):
                 done, _ = wait(active, return_when=FIRST_COMPLETED)
                 for future in done:
                     idx, freed_device = active.pop(future)
-                    results[idx] = future.result()
+                    try:
+                        results[idx] = future.result()
+                    except Exception:  # noqa: BLE001 - e.g. a killed worker process
+                        import logging
+
+                        logging.error(
+                            "Walker %s did not return a result (worker died); "
+                            "marking it unsuccessful.",
+                            idx,
+                        )
+                        results[idx] = False
                     submitted = submit(executor, freed_device)
                     if submitted is not None:
                         next_future, next_idx, dev = submitted

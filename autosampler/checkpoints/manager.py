@@ -1,4 +1,5 @@
 import logging
+import os
 import pickle
 import torch
 from pathlib import Path
@@ -11,6 +12,50 @@ CHECKPOINT_FORMAT_VERSION = 2
 # CV methods whose projection network lives in ``space_model.fitted`` as a
 # torch module and is additionally snapshotted as ``model.pt``.
 _TORCH_ENCODER_MODES = ("tvae", "vampnet", "spib")
+
+
+def _atomic_pickle(obj: Any, path: Path) -> None:
+    """Pickle ``obj`` to ``path`` atomically (write tmp, then os.replace).
+
+    Prevents a crash mid-write (e.g. an HPC walltime kill) from leaving a
+    truncated file — important for delta history, where every checkpoint's
+    ``history.pkl`` is needed to reconstruct the full history on resume.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "wb") as handle:
+        pickle.dump(obj, handle)
+    os.replace(tmp, path)
+
+
+def reconstruct_history(checkpoint_root: Path, iteration: int) -> Dict[Any, Any]:
+    """Merge the per-checkpoint delta ``history.pkl`` files (for all iterations
+    ``<= iteration``) into the full cumulative history.
+
+    Each key normally lives in exactly one delta; on overlap the newer checkpoint
+    wins. Unreadable deltas (truncated by a crash) are skipped with a warning
+    rather than aborting the whole restore.
+    """
+    iters = sorted(
+        int(path.name.removeprefix("iter_"))
+        for path in checkpoint_root.glob("iter_*")
+        if path.is_dir()
+        and path.name.removeprefix("iter_").isdigit()
+        and int(path.name.removeprefix("iter_")) <= iteration
+    )
+    full: Dict[Any, Any] = {}
+    for it in iters:
+        hist_file = checkpoint_root / f"iter_{it}" / "history.pkl"
+        if not hist_file.exists():
+            continue
+        try:
+            with open(hist_file, "rb") as handle:
+                part = pickle.load(handle)
+        except Exception as exc:  # noqa: BLE001 - tolerate a corrupt delta
+            logging.warning("Skipping unreadable history delta %s: %s", hist_file, exc)
+            continue
+        if isinstance(part, dict):
+            full.update(part)
+    return full
 
 
 class CheckpointManager:
@@ -32,45 +77,48 @@ class CheckpointManager:
         """Save a complete state snapshot."""
         iter_dir = self.checkpoint_dir / f"iter_{iteration}"
         iter_dir.mkdir(exist_ok=True)
-        (iter_dir / "format_version").write_text(str(CHECKPOINT_FORMAT_VERSION))
 
         # 1. Save Space Model (TVAE or TICA)
         if space_model is not None:
-            with open(iter_dir / "space_model.pkl", "wb") as f:
-                pickle.dump(space_model, f)
+            _atomic_pickle(space_model, iter_dir / "space_model.pkl")
 
         if hasattr(space_model, "type"):
             if (
                 space_model.type in _TORCH_ENCODER_MODES
                 and getattr(space_model, "fitted", None) is not None
             ):
-                torch.save(space_model.fitted.state_dict(), iter_dir / "model.pt")
+                tmp = iter_dir / "model.pt.tmp"
+                torch.save(space_model.fitted.state_dict(), tmp)
+                os.replace(tmp, iter_dir / "model.pt")
             elif (
                 space_model.type == "tica"
                 and getattr(space_model, "model", None) is not None
             ):
-                with open(iter_dir / "model.pkl", "wb") as f:
-                    pickle.dump(space_model.model, f)
+                _atomic_pickle(space_model.model, iter_dir / "model.pkl")
 
         # 2. Save Feature Scaler
-        with open(iter_dir / "scaler.pkl", "wb") as f:
-            pickle.dump(scaler, f)
-            
+        _atomic_pickle(scaler, iter_dir / "scaler.pkl")
+
         # 3. Save Bins & Spawn History
-        with open(iter_dir / "bin_state.pkl", "wb") as f:
-            pickle.dump(bin_state, f)
-            
-        # Delta Checkpointing: Only save history since the last checkpoint
+        _atomic_pickle(bin_state, iter_dir / "bin_state.pkl")
+
+        # Delta checkpointing: each file stores only the history since the last
+        # checkpoint. load()/reconstruct_history() merge the deltas back into the
+        # full history. Writes are atomic so a crash can't truncate a delta and
+        # break the chain.
         last_ckpt = self._get_latest_checkpoint_before(iteration)
         delta_history = {
             k: v for k, v in history.items() if k > last_ckpt and k <= iteration
         }
-        with open(iter_dir / "history.pkl", "wb") as f:
-            pickle.dump(delta_history, f)
-            
+        _atomic_pickle(delta_history, iter_dir / "history.pkl")
+
         if sampler_state is not None:
-            with open(iter_dir / "sampler_state.pkl", "wb") as f:
-                pickle.dump(sampler_state, f)
+            _atomic_pickle(sampler_state, iter_dir / "sampler_state.pkl")
+
+        # Write the format marker last: its presence signals a complete checkpoint.
+        tmp = iter_dir / "format_version.tmp"
+        tmp.write_text(str(CHECKPOINT_FORMAT_VERSION))
+        os.replace(tmp, iter_dir / "format_version")
 
     def load(
         self, iteration: int, space_model: Any = None
@@ -107,34 +155,11 @@ class CheckpointManager:
         with open(iter_dir / "scaler.pkl", "rb") as f:
             scaler = pickle.load(f)
             
-        # 3. Load bins & history
+        # 3. Load bins & reconstruct the full (delta-checkpointed) history.
         with open(iter_dir / "bin_state.pkl", "rb") as f:
             bin_state = pickle.load(f)
-            
-        with open(iter_dir / "history.pkl", "rb") as f:
-            history = pickle.load(f)
 
-        # Reconstruct full history for Delta Checkpointing
-        checkpoint_dirs = [
-            path
-            for path in self.checkpoint_dir.glob("iter_*")
-            if path.is_dir() and path.name.removeprefix("iter_").isdigit()
-        ]
-        previous_iters = sorted([
-            int(path.name.removeprefix("iter_"))
-            for path in checkpoint_dirs
-            if int(path.name.removeprefix("iter_")) < iteration
-        ], reverse=True)
-        
-        for prev_iter in previous_iters:
-            prev_hist_file = self.checkpoint_dir / f"iter_{prev_iter}" / "history.pkl"
-            if prev_hist_file.exists():
-                with open(prev_hist_file, "rb") as f:
-                    part_hist = pickle.load(f)
-                    if isinstance(part_hist, dict):
-                        for k, v in part_hist.items():
-                            if k not in history:
-                                history[k] = v
+        history = reconstruct_history(self.checkpoint_dir, iteration)
 
         state_path = iter_dir / "sampler_state.pkl"
         if state_path.exists():
