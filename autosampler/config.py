@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, root_validator, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SystemConfig(BaseModel):
@@ -9,6 +9,7 @@ class SystemConfig(BaseModel):
     topology: str = "amber"
     system_file: Optional[str] = None
     project_file: Optional[str] = None
+    initial_trajectory: Optional[str] = None
     trajectory_topology_file: Optional[str] = None
     feature_selection: str = "protein and not (type H)"
 
@@ -38,7 +39,8 @@ class EngineConfig(BaseModel):
     amber_extra_args: List[str] = []
     amber_trajectory_format: str = "auto"
 
-    @validator("gpu_ids")
+    @field_validator("gpu_ids")
+    @classmethod
     def validate_gpu_ids(cls, value: Optional[List[int]]) -> Optional[List[int]]:
         if value is None:
             return None
@@ -50,7 +52,8 @@ class EngineConfig(BaseModel):
             raise ValueError("gpu_ids must not contain duplicates")
         return value
 
-    @validator("amber_trajectory_format")
+    @field_validator("amber_trajectory_format")
+    @classmethod
     def validate_amber_trajectory_format(cls, value: str) -> str:
         value = value.lower()
         if value not in {"auto", "netcdf", "ascii"}:
@@ -75,6 +78,7 @@ class SpawningConfig(BaseModel):
     voronoi_periodic: bool = False
     voronoi_grid_size: int = 250
     lof_neighbors: int = 20
+    we_target_per_bin: int = 4  # weighted-ensemble walkers per occupied bin
     resolution_check_patience: int = 5
     resolution_max_bins: int = 150
     voronoi_max_clusters: int = 5000
@@ -91,14 +95,19 @@ class AdaptiveModelConfig(BaseModel):
     decoder_hidden_dims: List[int] = [128, 256]
     dropout_rate: float = 0.1
     deep_tica_hidden_dims: List[int] = [256, 128]
+    # SPIB (State Predictive Information Bottleneck) hyperparameters.
+    spib_n_states: int = 10
+    spib_beta: float = 1e-3
 
-    @validator("lagtime", "latent_dim", "epochs")
+    @field_validator("lagtime", "latent_dim", "epochs")
+    @classmethod
     def validate_positive_int(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("must be greater than 0")
         return value
 
-    @validator("batch_size")
+    @field_validator("batch_size")
+    @classmethod
     def validate_batch_size(cls, value: Union[int, str]) -> Union[int, str]:
         if isinstance(value, str):
             if value != "auto":
@@ -108,19 +117,22 @@ class AdaptiveModelConfig(BaseModel):
             raise ValueError("batch_size must be 'auto' or a positive integer")
         return value
 
-    @validator("learning_rate")
+    @field_validator("learning_rate")
+    @classmethod
     def validate_learning_rate(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("learning_rate must be greater than 0")
         return value
 
-    @validator("dropout_rate")
+    @field_validator("dropout_rate")
+    @classmethod
     def validate_dropout_rate(cls, value: float) -> float:
         if value < 0 or value >= 1:
             raise ValueError("dropout_rate must be >= 0 and < 1")
         return value
 
-    @validator("encoder_hidden_dims", "decoder_hidden_dims", "deep_tica_hidden_dims")
+    @field_validator("encoder_hidden_dims", "decoder_hidden_dims", "deep_tica_hidden_dims")
+    @classmethod
     def validate_hidden_dims(cls, value: List[int]) -> List[int]:
         if not value:
             raise ValueError("hidden dimension lists must not be empty")
@@ -129,10 +141,203 @@ class AdaptiveModelConfig(BaseModel):
         return value
 
 
+class MSMConfig(BaseModel):
+    """Configuration for Markov State Model estimation and MSM-based convergence.
+
+    All MSM behaviour is opt-in: with ``enabled=False`` (the default) the
+    adaptive loop keeps its legacy bin-occupancy convergence and no MSM is built,
+    so existing configs and examples are unaffected.
+    """
+
+    enabled: bool = False
+    # How often (in iterations) to (re)estimate the MSM. 1 = every iteration.
+    cadence: int = 1
+    # Minimum cumulative frames before the first MSM is attempted.
+    min_frames: int = 1000
+    lagtime: int = 10
+    # Optional lag-time ladder for an implied-timescale sweep (diagnostics).
+    lagtimes: Optional[List[int]] = None
+    n_microstates: int = 100
+    cluster_method: str = "kmeans"  # "kmeans" | "regspace"
+    estimator: str = "mle"  # "mle" | "bayesian"
+    n_bayesian_samples: int = 50
+    n_timescales: int = 3
+    n_metastable: Optional[int] = None
+    # Keep microstate IDs comparable across iterations (seeds k-means from the
+    # previous centres) — needed for transition-matrix convergence / spawning.
+    stable_clustering: bool = False
+    # MSM-guided spawner (spawn_scheme: msm) knobs.
+    spawn_alpha: float = 1.0  # weight of the least-counts/exploration term
+    spawn_leverage: int = 1  # slow eigenvectors used for the leverage factor
+    spawn_uncertainty: bool = True  # include the outflow-uncertainty factor
+    # Convergence: list of {name, params} criteria combined with all/any.
+    convergence_criteria: List[Dict[str, Any]] = Field(
+        default_factory=lambda: [
+            {"name": "implied_timescales", "params": {"tol": 0.1, "n_timescales": 2}},
+            {"name": "vamp2", "params": {"tol": 0.05}},
+        ]
+    )
+    convergence_mode: str = "all"  # "all" | "any"
+    convergence_patience: int = 2
+
+    @field_validator("cadence", "lagtime", "n_microstates", "n_timescales")
+    @classmethod
+    def _positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("must be greater than 0")
+        return value
+
+    @field_validator("cluster_method")
+    @classmethod
+    def _cluster_method(cls, value: str) -> str:
+        value = value.lower()
+        if value not in {"kmeans", "regspace"}:
+            raise ValueError("cluster_method must be 'kmeans' or 'regspace'")
+        return value
+
+    @field_validator("estimator")
+    @classmethod
+    def _estimator(cls, value: str) -> str:
+        value = value.lower()
+        if value not in {"mle", "bayesian"}:
+            raise ValueError("estimator must be 'mle' or 'bayesian'")
+        return value
+
+    @field_validator("convergence_mode")
+    @classmethod
+    def _mode(cls, value: str) -> str:
+        value = value.lower()
+        if value not in {"all", "any"}:
+            raise ValueError("convergence_mode must be 'all' or 'any'")
+        return value
+
+
+class FeatureSelectionConfig(BaseModel):
+    """VAMP-2 based selection/optimisation of the input features for the CV/MSM.
+
+    Opt-in (``enabled=False`` by default). When enabled, the adaptive loop
+    periodically scores feature columns by VAMP-2 and keeps the subset that best
+    resolves the slow dynamics, adaptively updating it every ``cadence``
+    iterations.
+    """
+
+    enabled: bool = False
+    method: str = "greedy_vamp"  # "greedy_vamp" | "all"
+    lagtime: int = 10
+    cadence: int = 5  # re-select every N iterations (adaptive update)
+    max_features: Optional[int] = None  # cap on selected columns/groups
+    dim: Optional[int] = None  # singular values retained when scoring
+    min_gain: float = 1e-4  # minimum VAMP-2 gain to add a feature group
+    # Optional: rank these feature *types* by VAMP-2 and use the best one.
+    # Empty -> always use the top-level `adaptive_feature_type`.
+    candidate_feature_types: List[str] = []
+
+    @field_validator("method")
+    @classmethod
+    def _method(cls, value: str) -> str:
+        if value not in {"greedy_vamp", "all"}:
+            raise ValueError("feature_selection.method must be 'greedy_vamp' or 'all'")
+        return value
+
+    @field_validator("candidate_feature_types")
+    @classmethod
+    def _candidate_types(cls, value: List[str]) -> List[str]:
+        valid = {"distances", "fitted_coords", "phi_psi"}
+        bad = [v for v in value if v not in valid]
+        if bad:
+            raise ValueError(
+                "feature_selection.candidate_feature_types must be a subset of "
+                f"{sorted(valid)}; got invalid {bad}"
+            )
+        return value
+
+    @field_validator("lagtime", "cadence")
+    @classmethod
+    def _positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("must be greater than 0")
+        return value
+
+
+class ExecutionConfig(BaseModel):
+    """Where and how walker MD jobs are dispatched.
+
+    ``backend: local`` (default) runs walkers as local subprocesses across CPU
+    or GPU slots (multi-GPU workstation). ``slurm`` / ``pbs`` submit each
+    iteration's walkers as a scheduler array job for CPU-only or GPU HPC
+    clusters. Scheduler fields are ignored by the local backend.
+    """
+
+    backend: str = "local"  # "local" | "slurm" | "pbs"
+    # Scheduler resource requests (per array task = one walker).
+    partition: Optional[str] = None  # SLURM partition / PBS queue
+    account: Optional[str] = None
+    walltime: str = "01:00:00"
+    cpus_per_task: int = 1
+    gpus_per_task: int = 0
+    memory: Optional[str] = None  # e.g. "8G"
+    # Robustness / polling.
+    max_retries: int = 1  # resubmit failed walkers up to this many times
+    poll_interval: float = 30.0  # seconds between scheduler polls
+    submit_timeout: float = 60.0  # seconds for a submit/poll command
+    module_loads: List[str] = []  # `module load ...` lines for job scripts
+    extra_directives: List[str] = []  # raw #SBATCH / #PBS lines
+    job_name: str = "autosampler"
+
+    @field_validator("backend")
+    @classmethod
+    def _backend(cls, value: str) -> str:
+        value = value.lower()
+        if value not in {"local", "slurm", "pbs"}:
+            raise ValueError("execution.backend must be 'local', 'slurm', or 'pbs'")
+        return value
+
+    @field_validator("cpus_per_task", "max_retries")
+    @classmethod
+    def _non_negative_int(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("must be >= 0")
+        return value
+
+    @field_validator("poll_interval", "submit_timeout")
+    @classmethod
+    def _positive_float(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("must be > 0")
+        return value
+
+
+class BinningConfig(BaseModel):
+    """Landscape-adaptive binning for the density / weighted-ensemble spawners.
+
+    ``uniform`` (default) is the constant-width grid (backward-compatible). The
+    adaptive schemes make bins finer in steep / low-density regions (barriers) and
+    coarser in flat basins, recomputed every iteration.
+    """
+
+    scheme: str = "uniform"  # uniform | gradient | mab | eigenvector
+    n_fine: int = 100  # histogram resolution for the gradient scheme
+    smoothing: int = 3  # density smoothing window for the gradient scheme
+
+    @field_validator("scheme")
+    @classmethod
+    def _scheme(cls, value: str) -> str:
+        valid = {"uniform", "gradient", "mab", "eigenvector"}
+        if value not in valid:
+            raise ValueError(f"binning.scheme must be one of {sorted(valid)}")
+        return value
+
+
 class AutoSamplerConfig(BaseModel):
     system: SystemConfig
     engine: EngineConfig
     spawning: SpawningConfig
+    msm: MSMConfig = Field(default_factory=MSMConfig)
+    binning: BinningConfig = Field(default_factory=BinningConfig)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    feature_selection: FeatureSelectionConfig = Field(
+        default_factory=FeatureSelectionConfig
+    )
     space_mode: str = "fixed"
     n_bins: List[int] = [30, 30]
     min_values: Optional[List[float]] = None
@@ -142,12 +347,36 @@ class AutoSamplerConfig(BaseModel):
     checkpoint_freq: int = 1
     save_features: bool = True
     retrain_freq: int = 1
+    # CV-retraining policy: "fixed" (every retrain_freq iters) or "vamp_adaptive"
+    # (retrain when the CV's VAMP-2 score drops by vamp_retrain_tol).
+    retrain_policy: str = "fixed"
+    vamp_retrain_tol: float = 0.1
+    retrain_min_interval: int = 1
+    retrain_max_interval: Optional[int] = None
     aggregate_memory: bool = True
     max_adaptive_memory_frames: int = 50000
     adaptive_feature_type: str = "distances"
     adaptive_model: AdaptiveModelConfig = Field(default_factory=AdaptiveModelConfig)
 
-    @root_validator(pre=True)
+    @field_validator("retrain_policy")
+    @classmethod
+    def _retrain_policy(cls, value: str) -> str:
+        if value not in {"fixed", "vamp_adaptive"}:
+            raise ValueError("retrain_policy must be 'fixed' or 'vamp_adaptive'")
+        return value
+
+    @field_validator("space_mode")
+    @classmethod
+    def validate_space_mode(cls, value: str) -> str:
+        from autosampler.spaces.registry import FIXED_MODE, adaptive_modes
+
+        valid = (FIXED_MODE,) + adaptive_modes()
+        if value not in valid:
+            raise ValueError(f"space_mode must be one of {valid}; got {value!r}")
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
     def promote_spawning_n_bins(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         values = dict(values)
         if "n_bins" not in values:

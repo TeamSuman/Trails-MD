@@ -26,7 +26,7 @@ from typing import Optional
 
 import numpy as np
 
-from .base import MDEngine
+from .base import MDEngine, md_subprocess_timeout
 
 
 def resolve_amber_trajectory_format(
@@ -319,6 +319,7 @@ class AmberEngine(MDEngine):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=md_subprocess_timeout(),
             )
         except subprocess.CalledProcessError as exc:
             logging.error(
@@ -326,6 +327,13 @@ class AmberEngine(MDEngine):
                 run_index,
                 exc.returncode,
                 exc.stderr,
+            )
+            return False
+        except subprocess.TimeoutExpired:
+            logging.error(
+                "AmberEngine run %d timed out after %ss.",
+                run_index,
+                md_subprocess_timeout(),
             )
             return False
         except FileNotFoundError:

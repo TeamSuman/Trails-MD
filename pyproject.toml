@@ -14,7 +14,7 @@ dependencies = [
   "numpy>=1.23",
   "scipy>=1.9",
   "shapely>=2.0",
-  "pydantic>=1.10",
+  "pydantic>=2.0",
   "pyyaml>=6.0",
   "scikit-learn>=1.2",
   "MDAnalysis>=2.5",
@@ -45,9 +45,13 @@ examples = [
 ]
 test = [
   "pytest>=7.0",
+  "ruff>=0.6",
+]
+docs = [
+  "mkdocs-material>=9.0",
 ]
 all = [
-  "autosampler[deep-tica,examples,test]",
+  "autosampler[deep-tica,examples,test,docs]",
 ]
 
 [tool.setuptools.packages.find]
@@ -63,7 +67,33 @@ autosampler = "autosampler.cli:main"
 autosampler-run = "autosampler.cli:main"
 autosampler-path = "autosampler.path_cli:main"
 autosampler-log = "autosampler.log_cli:main"
+autosampler-analyze = "autosampler.analysis_cli:main"
+autosampler-init = "autosampler.init_cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.black]
+line-length = 88
+target-version = ["py310", "py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+# Pragmatic starter rule set; expand over time as the codebase is cleaned up.
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+  "E501",  # line length handled by black
+  "B008",  # function calls in argument defaults (used intentionally)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # re-exports
+"tests/*" = ["E402"]  # importorskip before imports

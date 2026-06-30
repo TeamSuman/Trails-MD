@@ -22,6 +22,8 @@ class AdaptiveSpaceModel:
         "decoder_hidden_dims": [128, 256],
         "dropout_rate": 0.1,
         "deep_tica_hidden_dims": [256, 128],
+        "spib_n_states": 10,
+        "spib_beta": 1e-3,
     }
 
     def __init__(
@@ -36,6 +38,8 @@ class AdaptiveSpaceModel:
         decoder_hidden_dims: list[int] | None = None,
         dropout_rate: float = 0.1,
         deep_tica_hidden_dims: list[int] | None = None,
+        spib_n_states: int = 10,
+        spib_beta: float = 1e-3,
         **_: Any,
     ):
         self.type = space_mode
@@ -48,12 +52,19 @@ class AdaptiveSpaceModel:
         self.decoder_hidden_dims = list(decoder_hidden_dims or [128, 256])
         self.dropout_rate = float(dropout_rate)
         self.deep_tica_hidden_dims = list(deep_tica_hidden_dims or [256, 128])
+        self.spib_n_states = int(spib_n_states)
+        self.spib_beta = float(spib_beta)
         self.scaler = TrajectoryScaler("minmax")
         self.model = None
-        self.fited = None  # PyTorch model for projection
+        self.fitted = None  # PyTorch model used for projection
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     def __setstate__(self, state: dict) -> None:
+        state = dict(state)
+        # Backwards compatibility: pre-2.x checkpoints stored the projection
+        # network under the misspelled attribute ``fited``.
+        if "fited" in state and "fitted" not in state:
+            state["fitted"] = state.pop("fited")
         self.__dict__.update(state)
         self.ensure_config_defaults()
 
@@ -86,6 +97,12 @@ class AdaptiveSpaceModel:
         """
         self.ensure_config_defaults()
         input_size = features.shape[-1]
+
+        # Fail fast with an actionable message if an optional backend is missing.
+        from .registry import ensure_available, is_adaptive_space
+
+        if is_adaptive_space(self.type):
+            ensure_available(self.type)
 
         # We need continuous trajectories for deeptime TVAE, so we split them by walker
         # features array should be ordered by walker, then time
@@ -127,8 +144,8 @@ class AdaptiveSpaceModel:
 
             self.model.fit(loader_train, n_epochs=self.epochs)
 
-            fited = self.model.fetch_model().copy()
-            self.fited = fited.encoder.eval().to('cpu')
+            fitted = self.model.fetch_model().copy()
+            self.fitted = fitted.encoder.eval().to('cpu')
 
         elif self.type == "tica":
             from deeptime.decomposition import TICA
@@ -191,18 +208,96 @@ class AdaptiveSpaceModel:
                 warnings.simplefilter("ignore")
                 trainer.fit(self.model, datamodule)
 
+        elif self.type == "vampnet":
+            from deeptime.decomposition.deep import VAMPNet
+            from deeptime.util.torch import MLP
+
+            scaled_features = self._torch_features(scaled_features)
+            traj_list = [
+                scaled_features[i * walker_length : (i + 1) * walker_length]
+                for i in range(n_walkers)
+            ]
+            lobe = MLP(
+                units=[input_size, *self.encoder_hidden_dims, self.latent_dim],
+                nonlinearity=torch.nn.SiLU,
+            ).to(self.device)
+            vampnet = VAMPNet(
+                lobe=lobe, learning_rate=self.learning_rate, device=self.device
+            )
+            dataset = TrajectoryDataset.from_trajectories(self.lagtime, traj_list)
+            loader_train = DataLoader(
+                dataset,
+                batch_size=self._batch_size(n_walkers, walker_length),
+                shuffle=True,
+            )
+            self.model = vampnet.fit(loader_train, n_epochs=self.epochs).fetch_model()
+            self.fitted = lobe.eval().to("cpu")
+
+        elif self.type == "spib":
+            from .spib import train_spib
+
+            scaled_features = self._torch_features(scaled_features)
+            traj_list = [
+                scaled_features[i * walker_length : (i + 1) * walker_length]
+                for i in range(n_walkers)
+            ]
+            self.fitted = train_spib(
+                traj_list,
+                lagtime=self.lagtime,
+                latent_dim=self.latent_dim,
+                hidden_dims=self.encoder_hidden_dims,
+                epochs=self.epochs,
+                learning_rate=self.learning_rate,
+                batch_size=self._batch_size(n_walkers, walker_length),
+                n_states=self.spib_n_states,
+                beta=self.spib_beta,
+                dropout=self.dropout_rate,
+                device=self.device,
+            )
+
+        elif self.type == "deep-lda":
+            # Deep-LDA is supervised: it requires per-frame state labels, so it
+            # is intended for the targeted/labelled workflow (e.g. known
+            # reactant/product basins) rather than fully autonomous exploration.
+            raise NotImplementedError(
+                "space_mode 'deep-lda' is supervised and needs per-frame state "
+                "labels; it is registered for the labelled/targeted workflow but "
+                "not wired into autonomous exploration. Use 'deep-tica', "
+                "'vampnet', 'spib' or 'tvae' for unsupervised adaptive sampling."
+            )
+
+        else:
+            raise ValueError(
+                f"space_mode {self.type!r} has no training implementation."
+            )
+
     def project(self, features: np.ndarray) -> np.ndarray:
         """Project scaled features into latent space."""
         self.ensure_config_defaults()
         scaled = self.scaler.transform(features)
 
         if self.type == "tvae":
-            device = next(self.fited.parameters()).device
+            device = next(self.fitted.parameters()).device
             tensor = torch.as_tensor(
                 self._torch_features(scaled), dtype=torch.float32, device=device
             )
             with torch.no_grad():
-                projected = self.fited(tensor)[0].detach().cpu().numpy()
+                projected = self.fitted(tensor)[0].detach().cpu().numpy()
+        elif self.type == "vampnet":
+            device = next(self.fitted.parameters()).device
+            tensor = torch.as_tensor(
+                self._torch_features(scaled), dtype=torch.float32, device=device
+            )
+            with torch.no_grad():
+                projected = self.fitted(tensor).detach().cpu().numpy()
+        elif self.type == "spib":
+            device = next(self.fitted.parameters()).device
+            tensor = torch.as_tensor(
+                self._torch_features(scaled), dtype=torch.float32, device=device
+            )
+            with torch.no_grad():
+                mean, _ = self.fitted(tensor)
+                projected = mean.detach().cpu().numpy()
         elif self.type == "deep-tica":
             tensor = torch.as_tensor(
                 self._torch_features(scaled), dtype=torch.float32

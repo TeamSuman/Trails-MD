@@ -4,6 +4,7 @@ from pathlib import Path
 import importlib.util
 import json
 import shutil
+import sys
 
 # Suppress common non-critical warnings from dependencies
 warnings.filterwarnings(
@@ -16,13 +17,14 @@ from typing import Any, Dict, List
 import numpy as np
 from pydantic import ValidationError
 
-from autosampler.binning.we import WEResampler
 from autosampler.checkpoints.manager import CheckpointManager
 from autosampler.config import AutoSamplerConfig
 from autosampler.engines.amber import amber_trajectory_suffix
 from autosampler.engines.base import EngineFactory
 from autosampler.paths import build_frame_records, map_global_frame
+from autosampler.reporting import IterationReporter
 from autosampler.spaces import AdaptiveSpaceModel, FeatureExtractor
+from autosampler.spaces.registry import is_adaptive_space
 from autosampler.spawners.base import SpawnerFactory
 from autosampler.utils.seeds import SeedManager
 from autosampler.workflows.parallel import run_iteration_parallel
@@ -50,13 +52,16 @@ class AutoSamplerCore:
         # Initialize Checkpoint Manager
         self.checkpoint_manager = CheckpointManager(str(self.outdir / "checkpoints"))
 
+        # Terminal progress reporter (presentation only).
+        self.reporter = IterationReporter()
+
         # Initialize Engine
         _engine_kwargs = {
-            k: v for k, v in self.config.engine.dict().items() if k != "md_engine"
+            k: v for k, v in self.config.engine.model_dump().items() if k != "md_engine"
         }
         self.engine = EngineFactory.get(self.config.engine.md_engine, **_engine_kwargs)
 
-        is_adaptive = self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]
+        is_adaptive = is_adaptive_space(self.config.space_mode)
         # Initialize Spawner
         self.spawner = SpawnerFactory.get(
             self.config.spawning.spawn_scheme,
@@ -71,10 +76,34 @@ class AutoSamplerCore:
             periodic=self.config.spawning.voronoi_periodic,
             grid_size=self.config.spawning.voronoi_grid_size,
             n_neighbors=self.config.spawning.lof_neighbors,
+            target_per_bin=self.config.spawning.we_target_per_bin,
+            alpha=self.config.msm.spawn_alpha,
+            leverage=self.config.msm.spawn_leverage,
+            uncertainty=self.config.msm.spawn_uncertainty,
+            seed=self.config.random_seed,
         )
 
-        # Initialize Resampler
-        self.resampler = WEResampler()
+        # Landscape-adaptive binning (opt-in via config.binning.scheme); supplied
+        # to the density / WE spawners. `uniform` leaves the spawners on the grid.
+        binning_cfg = getattr(self.config, "binning", None)
+        if (
+            binning_cfg is not None
+            and binning_cfg.scheme != "uniform"
+            and hasattr(self.spawner, "binner")
+        ):
+            from autosampler.binning.adaptive import make_binner
+
+            self.spawner.binner = make_binner(
+                binning_cfg.scheme,
+                n_bins=self.config.n_bins,
+                min_values=None if is_adaptive else self.config.min_values,
+                max_values=None if is_adaptive else self.config.max_values,
+                target=self.config.spawning.target
+                if self.config.spawning.search_mode == "target"
+                else None,
+                n_fine=binning_cfg.n_fine,
+                smoothing=binning_cfg.smoothing,
+            )
 
         # State variables
         self.iteration = 0
@@ -90,6 +119,56 @@ class AutoSamplerCore:
         self.convergence_stall_count = 0
         self.converged = False
         self.convergence_reason = None
+
+        # VAMP-2 input-feature selection (opt-in via config.feature_selection).
+        self.feature_selector = None
+        self.feature_selection_indices = None
+        self.last_feature_selection = None
+        self.selected_feature_type = None
+        fs_cfg = getattr(self.config, "feature_selection", None)
+        if fs_cfg is not None and fs_cfg.enabled:
+            from autosampler.spaces.feature_selection import FeatureSelector
+
+            self.feature_selector = FeatureSelector(
+                lagtime=fs_cfg.lagtime,
+                method=fs_cfg.method,
+                max_features=fs_cfg.max_features,
+                dim=fs_cfg.dim,
+                min_gain=fs_cfg.min_gain,
+            )
+
+        # Adaptive CV-retraining policy (VAMP-2 driven when configured).
+        from autosampler.spaces.retraining import RetrainController
+
+        self.retrain_controller = RetrainController(
+            policy=self.config.retrain_policy,
+            retrain_freq=self.config.retrain_freq,
+            vamp_tol=self.config.vamp_retrain_tol,
+            min_interval=self.config.retrain_min_interval,
+            max_interval=self.config.retrain_max_interval,
+        )
+
+        # MSM subsystem (opt-in via config.msm.enabled).
+        self.msm_estimator = None
+        self.msm_monitor = None
+        self.last_msm_result = None
+        msm_cfg = getattr(self.config, "msm", None)
+        if msm_cfg is not None and msm_cfg.enabled:
+            from autosampler.msm import MSMEstimator, build_monitor_from_config
+
+            self.msm_estimator = MSMEstimator(
+                lagtime=msm_cfg.lagtime,
+                n_microstates=msm_cfg.n_microstates,
+                cluster_method=msm_cfg.cluster_method,
+                estimator=msm_cfg.estimator,
+                n_metastable=msm_cfg.n_metastable,
+                n_timescales=msm_cfg.n_timescales,
+                lagtimes=msm_cfg.lagtimes,
+                n_bayesian_samples=msm_cfg.n_bayesian_samples,
+                stable_clustering=getattr(msm_cfg, "stable_clustering", False),
+                seed=self.config.random_seed,
+            )
+            self.msm_monitor = build_monitor_from_config(msm_cfg)
 
     def prepare(self):
         """Prepare the simulation system."""
@@ -125,22 +204,14 @@ class AutoSamplerCore:
             raise RuntimeError(f"Preflight checks failed:\n  - {joined}")
 
     def _adaptive_model_kwargs(self) -> dict:
-        if hasattr(self.config.adaptive_model, "model_dump"):
-            kwargs = self.config.adaptive_model.model_dump()
-        else:
-            kwargs = self.config.adaptive_model.dict()
+        kwargs = self.config.adaptive_model.model_dump()
         kwargs["space_mode"] = self.config.space_mode
         return kwargs
 
     def restore_checkpoint(self, iteration: int):
         """Restore sampler state from a saved checkpoint and resume at the next iteration."""
         restored_model = self.space_model
-        if restored_model is None and self.config.space_mode in [
-            "tvae",
-            "tica",
-            "deep-tica",
-            "pca",
-        ]:
+        if restored_model is None and is_adaptive_space(self.config.space_mode):
             restored_model = AdaptiveSpaceModel(**self._adaptive_model_kwargs())
 
         (
@@ -192,6 +263,7 @@ class AutoSamplerCore:
             raise RuntimeError(
                 f"Checkpoint history entry {latest_iteration} has no trajectories."
             )
+        self._validate_sampling_trajectories(trajectories, context="resume")
 
         trajectory_topology = (
             self.config.system.trajectory_topology_file or self.config.system.top_file
@@ -204,6 +276,91 @@ class AutoSamplerCore:
             trajectories,
             list(spawn_indices),
         )
+
+
+    def generate_initial_walkers(self) -> List[Any]:
+        if not self.config.system.initial_trajectory:
+            return [self.engine.positions for _ in range(self.config.spawning.walker)]
+            
+        import logging
+        import numpy as np
+        import random
+        from pathlib import Path
+        import MDAnalysis as mda
+        from autosampler.spaces import FeatureExtractor
+        
+        traj_path = str(Path(self.config.system.initial_trajectory).resolve())
+        logging.info(f"Initializing walkers from trajectory: {traj_path}")
+        
+        trajectory_topology = (
+            self.config.system.trajectory_topology_file or self.config.system.top_file
+        )
+        
+        u = mda.Universe(trajectory_topology, traj_path)
+        n_frames = len(u.trajectory)
+        n_walkers = self.config.spawning.walker
+        
+        if n_frames == 0:
+            raise ValueError(f"Initial trajectory {traj_path} contains 0 frames.")
+            
+        points = None
+        if hasattr(self, "_extract_physical_cvs") and self.config.system.project_file:
+            try:
+                points = self._extract_physical_cvs([traj_path])
+            except Exception as e:
+                logging.warning(f"Failed to extract CVs from initial trajectory, falling back to random sampling: {e}")
+                
+        if points is not None and len(points) > n_walkers:
+            logging.info(f"Selecting {n_walkers} starting walkers from {n_frames} frames using spawning scheme...")
+            try:
+                # the spawner might require history for some things, but mostly just points.
+                # Since history is empty, pass it empty.
+                spawn_indices = self.spawner.sample(points, n_walkers, history={})
+            except Exception as e:
+                logging.warning(f"Spawning scheme failed on initial trajectory: {e}. Falling back to uniform.")
+                spawn_indices = list(np.linspace(0, n_frames - 1, n_walkers, dtype=int))
+        else:
+            if n_frames >= n_walkers:
+                logging.info(f"Using uniform sampling for {n_walkers} starting walkers from {n_frames} frames.")
+                spawn_indices = list(np.linspace(0, n_frames - 1, n_walkers, dtype=int))
+                print("EXACT SPAWN INDICES:", spawn_indices)
+            else:
+                logging.info(f"Only {n_frames} frames available for {n_walkers} walkers; replicating randomly.")
+                spawn_indices = [random.choice(range(n_frames)) for _ in range(n_walkers)]
+                
+        feature_extractor = FeatureExtractor(
+            topology=trajectory_topology,
+            selection=self.config.system.feature_selection,
+        )
+        walkers = feature_extractor.extract_positions_by_indices(
+            [traj_path], spawn_indices
+        )
+        
+        if points is not None:
+            from autosampler.core import build_frame_records
+            frames = build_frame_records(
+                iteration=-1,
+                trajectories=[traj_path],
+                points=np.asarray(points),
+                walker_parents=["initial"],
+                expected_frames=n_frames,
+            )
+            
+            next_walker_parents = [frames[idx]["key"] for idx in spawn_indices]
+            
+            self.history[-1] = {
+                "projection": points,
+                "spawning_scheme": "initial",
+                "trajectories": [traj_path],
+                "spawn_indices": list(spawn_indices),
+                "frames": frames,
+                "walker_parents": ["initial"],
+                "next_walker_parents": next_walker_parents,
+            }
+            self.walker_parents = next_walker_parents
+            logging.info(f"Injected {n_frames} frames from initial trajectory into permanent history (iteration -1).")
+            
+        return walkers
 
     def _traj_suffix(self) -> str:
         if self.config.engine.md_engine == "amber":
@@ -222,7 +379,7 @@ class AutoSamplerCore:
         runner_start_time = time.time()
 
         engine_kwargs = {
-            k: v for k, v in self.config.engine.dict().items() if k != "md_engine"
+            k: v for k, v in self.config.engine.model_dump().items() if k != "md_engine"
         }
         prepare_kwargs = {
             "conf": Path(self.config.system.conf_file),
@@ -243,6 +400,7 @@ class AutoSamplerCore:
             iteration=self.iteration,
             max_workers=self.config.spawning.max_workers,
             gpu_ids=self.config.engine.gpu_ids,
+            execution=getattr(self.config, "execution", None),
         )
 
         runner_time = time.time() - runner_start_time
@@ -277,6 +435,7 @@ class AutoSamplerCore:
             )
             for idx in range(len(walkers))
         ]
+        self._validate_trajectory_files(trajectories)
         trajectory_topology = (
             self.config.system.trajectory_topology_file or self.config.system.top_file
         )
@@ -284,20 +443,10 @@ class AutoSamplerCore:
             topology=trajectory_topology, selection=self.config.system.feature_selection
         )
 
-        if self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]:
-            # Feature Extraction
-            adaptive_feature_type = getattr(
-                self.config, "adaptive_feature_type", "distances"
+        if is_adaptive_space(self.config.space_mode):
+            features = self._extract_adaptive_features(
+                feature_extractor, trajectories
             )
-            if adaptive_feature_type == "phi_psi":
-                logging.info("Extracting AIB9 phi/psi dihedral features...")
-                features = feature_extractor.extract_aib9_phi_psi(trajectories)
-            elif adaptive_feature_type == "fitted_coords":
-                logging.info("Extracting fitted Cartesian coordinate features...")
-                features = feature_extractor.extract_fitted_coords(trajectories)
-            else:
-                logging.info("Extracting pairwise distance features...")
-                features = feature_extractor.extract_pairwise_distances(trajectories)
 
             if self.config.save_features:
                 np.savez_compressed(
@@ -308,19 +457,29 @@ class AutoSamplerCore:
             if self.config.aggregate_memory:
                 self.feature_memory.append(features)
 
-            # Train or update the Space Model
-            if self.space_model is None or (
-                self.config.retrain_freq > 0
-                and self.iteration % self.config.retrain_freq == 0
-            ):
+            # Train or update the Space Model (cadence decided by RetrainController)
+            n_frames = self.config.spawning.step // self.config.spawning.stride
+            has_model = self.space_model is not None
+            current_cv_score = None
+            if has_model and self.config.retrain_policy == "vamp_adaptive":
+                current_cv_score = self._cv_vamp_score(features, n_frames, len(walkers))
+            do_retrain = self.retrain_controller.should_retrain(
+                self.iteration, has_model, current_cv_score
+            )
+
+            if do_retrain:
                 if self.space_model is None:
                     logging.info(f"Training new {self.config.space_mode} model...")
                     self.space_model = AdaptiveSpaceModel(
                         **self._adaptive_model_kwargs()
                     )
                 else:
+                    reason = self.retrain_controller.last_reason or "scheduled"
                     logging.info(
-                        f"Retraining {self.config.space_mode} model (iteration {self.iteration})..."
+                        "Retraining %s model (iteration %d): %s",
+                        self.config.space_mode,
+                        self.iteration,
+                        reason,
                     )
 
                 if self.config.aggregate_memory:
@@ -346,36 +505,28 @@ class AutoSamplerCore:
                     fit_features = features
                     total_walkers = len(walkers)
 
-                n_frames = self.config.spawning.step // self.config.spawning.stride
+                self._maybe_select_features(fit_features, n_frames, total_walkers)
                 self.space_model.fit(
-                    fit_features, walker_length=n_frames, n_walkers=total_walkers
+                    self._fs_apply(fit_features),
+                    walker_length=n_frames,
+                    n_walkers=total_walkers,
                 )
                 self.scaler = self.space_model.scaler
                 self.adaptive_space_version += 1
                 self._refresh_adaptive_history_projections()
+                self.retrain_controller.notify_retrained(
+                    self._cv_vamp_score(features, n_frames, len(walkers))
+                )
+            else:
+                self.retrain_controller.notify_skipped()
 
             # Project onto latent space (project only current iteration features for history tracking)
             logging.info("Projecting features to latent space...")
-            points = self.space_model.project(features)
+            points = self.space_model.project(self._fs_apply(features))
         else:
             # Physical fixed space
             if self.config.system.project_file:
-                import importlib.util
-                import sys
-
-                project_path = Path(self.config.system.project_file)
-                spec = importlib.util.spec_from_file_location(
-                    "custom_project", str(project_path)
-                )
-                custom_project = importlib.util.module_from_spec(spec)
-                sys.modules["custom_project"] = custom_project
-                spec.loader.exec_module(custom_project)
-
-                points = custom_project.extract_cvs(
-                    trajectories=trajectories,
-                    top_file=self.config.system.top_file,
-                    conf_file=self.config.system.conf_file,
-                )
+                points = self._extract_physical_cvs(trajectories)
             else:
                 # Fallback to internal Rg-RMSD
                 points = feature_extractor.extract_rg_rmsd(
@@ -385,30 +536,16 @@ class AutoSamplerCore:
 
         # Always extract physical CVs for evaluation/plotting if project_file is provided
         if (
-            self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]
+            is_adaptive_space(self.config.space_mode)
             and self.config.system.project_file
         ):
             try:
-                import importlib.util
-                import sys
-
-                project_path = Path(self.config.system.project_file)
-                spec = importlib.util.spec_from_file_location(
-                    "custom_project", str(project_path)
-                )
-                custom_project = importlib.util.module_from_spec(spec)
-                sys.modules["custom_project"] = custom_project
-                spec.loader.exec_module(custom_project)
-                physical_points = custom_project.extract_cvs(
-                    trajectories=trajectories,
-                    top_file=self.config.system.top_file,
-                    conf_file=self.config.system.conf_file,
-                )
+                physical_points = self._extract_physical_cvs(trajectories)
                 np.savez_compressed(
                     self.outdir / f"iter_{self.iteration}" / "physical_cvs.npz",
                     cvs=physical_points,
                 )
-            except Exception as e:
+            except (ImportError, AttributeError, RuntimeError, OSError, ValueError) as e:
                 logging.warning(f"Failed to extract physical CVs for evaluation: {e}")
 
         np.savez_compressed(
@@ -423,10 +560,23 @@ class AutoSamplerCore:
             walker_parents=self.walker_parents,
             expected_frames=expected_frames,
         )
+        self._prune_unusable_history_trajectories()
+        # Hand the MSM-guided spawner the previous iteration's MSM + its clustering
+        # (consistent with each other; the spawner falls back to least-counts when
+        # either is None, e.g. iteration 0 or just after a resume).
+        if hasattr(self.spawner, "msm_result"):
+            self.spawner.msm_result = self.last_msm_result
+            self.spawner.cluster_model = getattr(
+                self.msm_estimator, "_cluster_model", None
+            )
         spawn_indices = self.spawner.sample(
             points, self.config.spawning.walker, history=self.history
         )
         sampling_trajectories = self._sampling_trajectories(trajectories)
+        self._validate_sampling_trajectories(
+            sampling_trajectories,
+            context=f"spawning iteration {self.iteration}",
+        )
         sampling_frame_records = self._sampling_frame_records(current_frame_records)
         next_walker_parents = [
             map_global_frame(sampling_frame_records, index)["key"]
@@ -447,7 +597,7 @@ class AutoSamplerCore:
             "walker_parents": list(self.walker_parents),
             "next_walker_parents": next_walker_parents,
         }
-        if self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]:
+        if is_adaptive_space(self.config.space_mode):
             self.history[self.iteration]["features"] = features
             self.history[self.iteration]["space_version"] = self.adaptive_space_version
 
@@ -476,7 +626,7 @@ class AutoSamplerCore:
         try:
             from autosampler.binning.spatial import RegularBinner
 
-            is_adaptive = self.config.space_mode in ["tvae", "tica", "deep-tica", "pca"]
+            is_adaptive = is_adaptive_space(self.config.space_mode)
             binner = RegularBinner(
                 n_bins=self.config.n_bins,
                 min_values=None if is_adaptive else self.config.min_values,
@@ -506,6 +656,9 @@ class AutoSamplerCore:
             bin_occupancy_str = "N/A"
             logging.debug(f"Failed to compute bin occupancy: {e}")
 
+        # MSM estimation + MSM-based convergence (opt-in).
+        self._maybe_build_msm()
+
         current_iteration = self.iteration - 1
         self._append_iteration_log(
             iteration=current_iteration,
@@ -520,42 +673,13 @@ class AutoSamplerCore:
             trajectories=trajectories,
         )
 
-        # Informative Output Logging (Tabular UI)
-        PURPLE, CYAN, GREEN, YELLOW, RED, BOLD, END = (
-            "\033[95m",
-            "\033[96m",
-            "\033[92m",
-            "\033[93m",
-            "\033[91m",
-            "\033[1m",
-            "\033[0m",
+        # Informative per-iteration banner (presentation extracted to reporting).
+        self.reporter.print_summary(
+            iteration=self.iteration - 1,
+            runner_time=runner_time,
+            other_time=other_time,
+            occupancy=bin_occupancy_str,
         )
-        width = 85
-
-        summary_str = (
-            f" Iteration: {CYAN}{self.iteration - 1:<4}{END} | "
-            f"Runner: {CYAN}{runner_time:<6.2f}s{END} | "
-            f"Other: {CYAN}{other_time:<5.2f}s{END} | "
-            f"Occupancy: {CYAN}{bin_occupancy_str:<9}{END}"
-        )
-
-        # Calculate visual length safely by stripping ANSI codes to center properly
-        # Alternatively, we just construct a fixed width using raw strings then apply color.
-        raw_summary = f" Iteration: {self.iteration - 1:<4} | Runner: {runner_time:<6.2f}s | Other: {other_time:<5.2f}s | Occupancy: {bin_occupancy_str:<9}"
-        left_pad = (width - len(raw_summary)) // 2
-        right_pad = width - len(raw_summary) - left_pad
-
-        result = f"\t{RED}╔" + "═" * width + f"╗\n{END}"
-        result += (
-            f"\t{RED}║{END}"
-            + " " * left_pad
-            + summary_str
-            + " " * right_pad
-            + f"{RED}║\n{END}"
-        )
-        result += f"\t{RED}╚" + "═" * width + f"╝{END}"
-
-        print(result)
 
         return {
             "success": results,
@@ -641,13 +765,13 @@ class AutoSamplerCore:
                     entry["projection"] = None
                 continue
             entry["projection"] = self.space_model.project(
-                np.asarray(features, dtype=float)
+                self._fs_apply(np.asarray(features, dtype=float))
             )
             entry["space_version"] = self.adaptive_space_version
 
     def _restore_feature_memory_from_history(self) -> None:
         """Rebuild adaptive feature memory from checkpointed history when possible."""
-        if self.config.space_mode not in ["tvae", "tica", "deep-tica", "pca"]:
+        if not is_adaptive_space(self.config.space_mode):
             return
 
         self.feature_memory = []
@@ -685,6 +809,12 @@ class AutoSamplerCore:
             "convergence_stall_count": self.convergence_stall_count,
             "converged": self.converged,
             "convergence_reason": self.convergence_reason,
+            "msm_monitor": self.msm_monitor.state_dict()
+            if self.msm_monitor is not None
+            else None,
+            "feature_selection_indices": self.feature_selection_indices,
+            "selected_feature_type": self.selected_feature_type,
+            "retrain_controller": self.retrain_controller.state_dict(),
         }
 
     def _restore_sampler_state(self, state: Dict[str, Any] | None) -> None:
@@ -702,6 +832,341 @@ class AutoSamplerCore:
         self.convergence_stall_count = int(state.get("convergence_stall_count", 0))
         self.converged = bool(state.get("converged", False))
         self.convergence_reason = state.get("convergence_reason")
+        if state.get("feature_selection_indices") is not None:
+            self.feature_selection_indices = list(state["feature_selection_indices"])
+        if state.get("selected_feature_type") is not None:
+            self.selected_feature_type = state["selected_feature_type"]
+        self.retrain_controller.load_state_dict(state.get("retrain_controller", {}))
+        if self.msm_monitor is not None and state.get("msm_monitor"):
+            self.msm_monitor.load_state_dict(state["msm_monitor"])
+
+    @staticmethod
+    def _trajectory_file_problems(trajectories: List[str]) -> list[str]:
+        bad: list[str] = []
+        for path in trajectories:
+            p = Path(path)
+            if not p.is_file():
+                bad.append(f"missing: {path}")
+            elif p.stat().st_size == 0:
+                bad.append(f"empty: {path}")
+        return bad
+
+    @staticmethod
+    def _validate_trajectory_files(trajectories: List[str]) -> None:
+        """Ensure each expected trajectory exists and is non-empty before reading.
+
+        A walker can report success yet leave a missing or truncated file (disk
+        full, killed writer); catching it here gives a clear error instead of an
+        opaque downstream parse failure.
+        """
+        bad = AutoSamplerCore._trajectory_file_problems(trajectories)
+        if bad:
+            joined = "\n  - ".join(bad)
+            raise RuntimeError(
+                "Trajectory files are not usable for CV extraction:\n  - " + joined
+            )
+
+    @staticmethod
+    def _validate_sampling_trajectories(
+        trajectories: List[str], context: str = "sampling"
+    ) -> None:
+        """Ensure cumulative trajectories are still available before spawning.
+
+        Current iteration outputs are validated before CV extraction. Spawning can
+        also sample frames from older history, especially after resume, so check
+        the complete sampling pool before handing paths to MDAnalysis.
+        """
+        try:
+            AutoSamplerCore._validate_trajectory_files(trajectories)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"Cannot extract walker start coordinates during {context}; "
+                "one or more sampled-history trajectory files are missing or empty. "
+                "Restore the listed files, remove the incomplete run directory, or "
+                "resume from a checkpoint whose trajectory files are present.\n"
+                f"{exc}"
+            ) from exc
+
+    def _prune_unusable_history_trajectories(self) -> None:
+        """Drop old history entries whose trajectory files can no longer be read."""
+        dropped: list[tuple[int, list[str]]] = []
+        for iteration in sorted(list(self.history)):
+            entry = self.history[iteration]
+            if not isinstance(entry, dict) or entry.get("projection") is None:
+                continue
+            stored = entry.get("trajectories")
+            trajectories = (
+                [str(path) for path in stored]
+                if stored
+                else self._infer_iteration_trajectories(iteration, entry["projection"])
+            )
+            problems = self._trajectory_file_problems(trajectories)
+            if problems:
+                dropped.append((iteration, problems))
+                del self.history[iteration]
+
+        for iteration, problems in dropped:
+            logging.warning(
+                "Dropping iteration %s from sampling history because trajectory "
+                "files are missing or empty: %s",
+                iteration,
+                "; ".join(problems[:5]),
+            )
+
+    def _fs_apply(self, features: np.ndarray) -> np.ndarray:
+        """Restrict features to the VAMP-selected columns (no-op if disabled)."""
+        if self.feature_selection_indices is None:
+            return features
+        return np.asarray(features)[:, self.feature_selection_indices]
+
+    def _extract_feature_type(
+        self, feature_extractor: FeatureExtractor, trajectories: List[str], ftype: str
+    ) -> np.ndarray:
+        if ftype == "phi_psi":
+            return feature_extractor.extract_aib9_phi_psi(trajectories)
+        if ftype == "fitted_coords":
+            return feature_extractor.extract_fitted_coords(trajectories)
+        return feature_extractor.extract_pairwise_distances(trajectories)
+
+    def _extract_adaptive_features(
+        self, feature_extractor: FeatureExtractor, trajectories: List[str]
+    ) -> np.ndarray:
+        """Extract input features, optionally ranking candidate feature *types* by VAMP-2."""
+        fs_cfg = getattr(self.config, "feature_selection", None)
+        candidates = list(getattr(fs_cfg, "candidate_feature_types", []) or [])
+        default_type = getattr(self.config, "adaptive_feature_type", "distances")
+
+        if not (fs_cfg and fs_cfg.enabled and candidates):
+            logging.info("Extracting %s features...", default_type)
+            return self._extract_feature_type(
+                feature_extractor, trajectories, self.selected_feature_type or default_type
+            )
+
+        due = self.selected_feature_type is None or (
+            fs_cfg.cadence > 0 and self.iteration % fs_cfg.cadence == 0
+        )
+        if not due:
+            return self._extract_feature_type(
+                feature_extractor, trajectories, self.selected_feature_type
+            )
+
+        # Extract every candidate type and rank them by VAMP-2.
+        from autosampler.spaces.feature_selection import rank_candidates
+
+        n_frames = self.config.spawning.step // self.config.spawning.stride
+        extracted: Dict[str, np.ndarray] = {}
+        for ftype in candidates:
+            try:
+                extracted[ftype] = self._extract_feature_type(
+                    feature_extractor, trajectories, ftype
+                )
+            except Exception as exc:  # noqa: BLE001 - skip system-incompatible types
+                logging.warning("Skipping feature type %r: %s", ftype, exc)
+        if not extracted:
+            return self._extract_feature_type(feature_extractor, trajectories, default_type)
+
+        candidate_trajs = {
+            ftype: [
+                feats[i * n_frames : (i + 1) * n_frames]
+                for i in range(max(1, len(feats) // max(1, n_frames)))
+            ]
+            for ftype, feats in extracted.items()
+        }
+        ranked = rank_candidates(candidate_trajs, fs_cfg.lagtime)
+        best = ranked[0][0]
+        if best != self.selected_feature_type:
+            # Column indices are tied to a feature type; reset on a type change.
+            self.feature_selection_indices = None
+            logging.info(
+                "VAMP-2 feature-type selection -> %s (scores: %s)",
+                best,
+                ", ".join(f"{n}={s:.3f}" for n, s in ranked),
+            )
+        self.selected_feature_type = best
+        return extracted[best]
+
+    def _cv_vamp_score(
+        self, features: np.ndarray, walker_length: int, n_walkers: int
+    ) -> float | None:
+        """VAMP-2 score of the current CV's latent projection of ``features``."""
+        if self.space_model is None:
+            return None
+        try:
+            latent = np.asarray(self.space_model.project(self._fs_apply(features)))
+        except Exception:  # noqa: BLE001 - scoring is best-effort
+            return None
+        if latent.ndim == 1:
+            latent = latent.reshape(-1, 1)
+        from autosampler.spaces.feature_selection import vamp2_score
+
+        lag = self.config.adaptive_model.lagtime
+        trajs = [
+            latent[i * walker_length : (i + 1) * walker_length]
+            for i in range(max(1, n_walkers))
+        ]
+        trajs = [t for t in trajs if len(t) > lag]
+        if not trajs:
+            return None
+        try:
+            return vamp2_score(trajs, lag)
+        except (ValueError, np.linalg.LinAlgError):
+            return None
+
+    def _maybe_select_features(
+        self, fit_features: np.ndarray, walker_length: int, n_walkers: int
+    ) -> None:
+        """(Re)select input-feature columns by VAMP-2 when due (opt-in)."""
+        if self.feature_selector is None:
+            return
+        cadence = self.config.feature_selection.cadence
+        due = self.feature_selection_indices is None or (
+            cadence > 0 and self.iteration % cadence == 0
+        )
+        if not due:
+            return
+
+        trajs = [
+            np.asarray(fit_features[i * walker_length : (i + 1) * walker_length])
+            for i in range(max(1, n_walkers))
+        ]
+        trajs = [t for t in trajs if len(t) > self.feature_selector.lagtime]
+        if not trajs:
+            return
+        try:
+            selection = self.feature_selector.select(trajs)
+        except (ValueError, np.linalg.LinAlgError) as exc:
+            logging.warning("Feature selection skipped: %s", exc)
+            return
+        self.feature_selection_indices = selection.columns
+        self.last_feature_selection = selection
+        logging.info(
+            "VAMP-2 feature selection: kept %d/%d features (score %.3f).",
+            len(selection.columns),
+            np.asarray(fit_features).shape[1],
+            selection.score,
+        )
+
+    def _extract_physical_cvs(self, trajectories: List[str]) -> np.ndarray:
+        """Load the user project file and extract physical CVs for ``trajectories``.
+
+        Centralises the ``project_file`` import + ``extract_cvs`` call that was
+        previously duplicated for both the fixed-space projection and the
+        evaluation-only physical CVs.
+        """
+        project_path = Path(self.config.system.project_file)
+        spec = importlib.util.spec_from_file_location(
+            "custom_project", str(project_path)
+        )
+        custom_project = importlib.util.module_from_spec(spec)
+        sys.modules["custom_project"] = custom_project
+        spec.loader.exec_module(custom_project)
+        return custom_project.extract_cvs(
+            trajectories=trajectories,
+            top_file=self.config.system.top_file,
+            conf_file=self.config.system.conf_file,
+        )
+
+    def _collect_msm_trajectories(self) -> List[Any]:
+        """Split cumulative history projections into continuous per-walker trajectories.
+
+        Each short walker is one continuous trajectory; transition counts are
+        pooled across all of them by the estimator. Single-frame segments are
+        dropped because they carry no transitions.
+        """
+        frames_per_walker = self.config.spawning.step // self.config.spawning.stride
+        trajs: List[Any] = []
+        for iteration in sorted(self.history):
+            entry = self.history[iteration]
+            if not isinstance(entry, dict):
+                continue
+            projection = entry.get("projection")
+            if projection is None:
+                continue
+            projection = np.asarray(projection, dtype=float)
+            if projection.ndim == 1:
+                projection = projection.reshape(-1, 1)
+            if frames_per_walker <= 0:
+                if len(projection) > 1:
+                    trajs.append(projection)
+                continue
+            n_walkers = int(np.ceil(len(projection) / frames_per_walker))
+            for walker in range(n_walkers):
+                segment = projection[
+                    walker * frames_per_walker : (walker + 1) * frames_per_walker
+                ]
+                if len(segment) > 1:
+                    trajs.append(segment)
+        return trajs
+
+    def _maybe_build_msm(self) -> None:
+        """Estimate the MSM for the just-completed iteration and update convergence."""
+        if self.msm_estimator is None or self.msm_monitor is None:
+            return
+
+        msm_cfg = self.config.msm
+        current_iteration = self.iteration - 1
+        if msm_cfg.cadence > 0 and current_iteration % msm_cfg.cadence != 0:
+            return
+
+        trajs = self._collect_msm_trajectories()
+        total_frames = sum(len(t) for t in trajs)
+        if total_frames < msm_cfg.min_frames:
+            logging.info(
+                "MSM skipped at iteration %d: %d cumulative frames < min_frames %d.",
+                current_iteration,
+                total_frames,
+                msm_cfg.min_frames,
+            )
+            return
+
+        try:
+            result = self.msm_estimator.fit(trajs, iteration=current_iteration)
+        except Exception as exc:  # noqa: BLE001 - MSM is diagnostic, never fatal
+            logging.warning(
+                "MSM estimation failed at iteration %d: %s", current_iteration, exc
+            )
+            return
+
+        self.last_msm_result = result
+        logging.info("Iteration %d %s", current_iteration, result.summary())
+        self._save_msm_result(current_iteration, result)
+
+        converged = self.msm_monitor.update(result)
+        logging.info("MSM convergence %s", self.msm_monitor.status_line())
+        if converged and not self.converged:
+            self.converged = True
+            self.convergence_reason = self.msm_monitor.reason
+
+    def _save_msm_result(self, iteration: int, result: Any) -> None:
+        try:
+            vamp2 = np.nan if result.vamp2_score is None else result.vamp2_score
+            arrays = {
+                "lagtime": np.asarray(result.lagtime),
+                "timescales": np.asarray(result.timescales, dtype=float),
+                "stationary_distribution": np.asarray(
+                    result.stationary_distribution, dtype=float
+                ),
+                "transition_matrix": np.asarray(
+                    result.transition_matrix, dtype=float
+                ),
+                "cluster_centers": np.asarray(result.cluster_centers, dtype=float),
+                "vamp2_score": np.asarray([vamp2], dtype=float),
+            }
+            if getattr(result, "metastable_populations", None) is not None:
+                arrays["metastable_populations"] = np.asarray(
+                    result.metastable_populations, dtype=float
+                )
+            if getattr(result, "count_matrix", None) is not None:
+                arrays["count_matrix"] = np.asarray(result.count_matrix, dtype=float)
+            if getattr(result, "eigenvectors", None) is not None:
+                arrays["eigenvectors"] = np.asarray(result.eigenvectors, dtype=float)
+            its = getattr(result, "its", None)
+            if its is not None:
+                arrays["its_lagtimes"] = np.asarray(its.lagtimes, dtype=float)
+                arrays["its_timescales"] = np.asarray(its.timescales, dtype=float)
+            np.savez_compressed(self.outdir / f"iter_{iteration}" / "msm.npz", **arrays)
+        except Exception as exc:  # noqa: BLE001
+            logging.debug("Failed to save msm.npz for iteration %d: %s", iteration, exc)
 
     def _update_resolution_and_convergence(self, occupied_bins: int | None) -> None:
         if occupied_bins is None:

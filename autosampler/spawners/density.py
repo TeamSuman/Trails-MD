@@ -30,17 +30,23 @@ class DensitySpawner(Spawner):
         self.probabilistic = probabilistic
         self.target = target
         self.recent_bins: deque[set[Any]] = deque(maxlen=recent_window)
+        # Optional landscape-adaptive binner (set by the orchestrator); None -> grid.
+        self.binner = None
 
     def sample(self, points: np.ndarray, top_n: int, history: dict[int, Any] | None = None) -> list[int]:
         points = np.asarray(points, dtype=float)
         cumulative_points = _cumulative_points(points, history)
-        binner = RegularBinner(
-            n_bins=self.n_bins,
-            min_values=self.min_values,
-            max_values=self.max_values,
-            target=self.target if self.mode == "target" else None,
-        )
-        table = binner.fit(cumulative_points)
+        if self.binner is not None:
+            # Keep the adaptive binner in sync with resolution bumps.
+            self.binner.n_bins = np.asarray(self.n_bins, dtype=int)
+            table = self.binner.fit(cumulative_points)
+        else:
+            table = RegularBinner(
+                n_bins=self.n_bins,
+                min_values=self.min_values,
+                max_values=self.max_values,
+                target=self.target if self.mode == "target" else None,
+            ).fit(cumulative_points)
         selected_rows = (
             self._probabilistic_rows(table, top_n)
             if self.probabilistic

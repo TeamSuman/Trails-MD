@@ -7,10 +7,13 @@ import copy
 import logging
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/autosampler-matplotlib")
+os.environ.setdefault(
+    "MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "autosampler-matplotlib")
+)
 
 SYSTEM_PATH_KEYS = (
     "conf_file",
@@ -77,9 +80,7 @@ def run(
             f"iter_{checkpoint_iteration}; next iteration is {sampler.iteration}."
         )
     else:
-        walkers = [
-            sampler.engine.positions for _ in range(sampler.config.spawning.walker)
-        ]
+        walkers = sampler.generate_initial_walkers()
 
     completed_iterations = 0
     for iteration in range(iterations):
