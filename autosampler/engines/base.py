@@ -37,6 +37,7 @@ class MDEngine(ABC):
 # Factory Registry
 class EngineFactory:
     _engines = {}
+    _lazy: dict = {}  # name -> (module_path, class_name)
 
     @classmethod
     def register(cls, name: str, engine_cls):
@@ -44,8 +45,34 @@ class EngineFactory:
         cls._engines[name] = engine_cls
 
     @classmethod
+    def register_lazy(cls, name: str, module_path: str, class_name: str):
+        """Register an engine that is imported only when first requested.
+
+        Keeps heavy optional backends (OpenMM, GROMACS, Amber) out of the import
+        path of ``import autosampler`` so the base install need not pull them in.
+        """
+        cls._lazy[name] = (module_path, class_name)
+
+    @classmethod
     def get(cls, name: str, **kwargs) -> MDEngine:
-        """Instantiate an engine by name."""
+        """Instantiate an engine by name (importing its backend on first use)."""
+        if name not in cls._engines and name in cls._lazy:
+            import importlib
+
+            module_path, class_name = cls._lazy[name]
+            try:
+                module = importlib.import_module(module_path)
+            except ImportError as exc:
+                raise ImportError(
+                    f"MD engine {name!r} needs an optional dependency that is not "
+                    f"installed ({exc}). Install it, e.g. "
+                    f"`pip install 'autosampler[{name}]'` or via conda."
+                ) from exc
+            cls._engines[name] = getattr(module, class_name)
         if name not in cls._engines:
             raise ValueError(f"Unknown MD engine: {name}")
         return cls._engines[name](**kwargs)
+
+    @classmethod
+    def available(cls) -> list:
+        return sorted(set(cls._engines) | set(cls._lazy))

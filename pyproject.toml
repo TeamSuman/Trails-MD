@@ -27,7 +27,6 @@ dependencies = [
   "pyyaml>=6.0",
   "scikit-learn>=1.2",
   "MDAnalysis>=2.5",
-  "openmm>=8.0",
   "torch>=2.0",
   "deeptime>=0.4",
 ]
@@ -52,6 +51,13 @@ Issues = "https://github.com/TeamSuman/AutoSampler/issues"
 Changelog = "https://github.com/TeamSuman/AutoSampler/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+# The default OpenMM engine. Kept optional because OpenMM is most reliably
+# installed from conda-forge; the engine is imported lazily so the base package
+# installs and imports without it. `pip install 'autosampler[openmm]'` pulls the
+# PyPI wheel where available.
+openmm = [
+  "openmm>=8.0",
+]
 deep-tica = [
   "lightning>=2.0",
   "mlcolvar>=1.0",
@@ -67,7 +73,7 @@ docs = [
   "mkdocs-material>=9.0",
 ]
 all = [
-  "autosampler[deep-tica,examples,test,docs]",
+  "autosampler[openmm,deep-tica,examples,test,docs]",
 ]
 
 [tool.setuptools.packages.find]
