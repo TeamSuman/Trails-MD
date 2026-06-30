@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-import pickle
 import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -40,7 +40,7 @@ class FrameRef:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "FrameRef":
+    def from_dict(cls, data: dict[str, Any]) -> FrameRef:
         return cls(
             iteration=int(data["iteration"]),
             walker=int(data["walker"]),
@@ -97,7 +97,7 @@ def build_frame_records(
 
     records: list[dict[str, Any]] = []
     point_offset = 0
-    for walker, (trajectory, count) in enumerate(zip(trajectories, counts)):
+    for walker, (trajectory, count) in enumerate(zip(trajectories, counts, strict=False)):
         for frame in range(count):
             parent = (
                 walker_parents[walker]

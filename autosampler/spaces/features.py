@@ -1,4 +1,3 @@
-from typing import Optional
 
 import MDAnalysis as mda  # type: ignore
 import numpy as np
@@ -22,7 +21,7 @@ def _load_universe(topology: str, trajectories: list[str] | str, **kwargs) -> md
 class FeatureExtractor:
     """Extracts features from MD trajectories for dimensionality reduction."""
 
-    def __init__(self, topology: str, selection: Optional[str] = None):
+    def __init__(self, topology: str, selection: str | None = None):
         self.topology = topology
         self.selection = selection if selection else "protein and not (type H)"
 
@@ -32,14 +31,14 @@ class FeatureExtractor:
         try:
             u = _load_universe(self.topology, trajectories)
         except Exception as e:
-            raise ValueError(f"Failed to load universe with top={self.topology}, trajs={trajectories}: {e}")
+            raise ValueError(f"Failed to load universe with top={self.topology}, trajs={trajectories}: {e}") from e
 
         ag = u.select_atoms(self.selection)
         num_pairs = ag.n_atoms * (ag.n_atoms - 1) // 2
 
         try:
             dist_list = np.zeros((u.trajectory.n_frames, num_pairs), dtype=np.float32)
-            for j, ts in enumerate(u.trajectory):
+            for j, _ts in enumerate(u.trajectory):
                 r = distance_array(ag, ag, box=u.dimensions, backend="OpenMP")
                 r = r[np.triu_indices(r.shape[0], k=1)]
                 dist_list[j] = r
@@ -57,14 +56,14 @@ class FeatureExtractor:
             ref = mda.Universe(self.topology)
             u = _load_universe(self.topology, trajectories)
         except Exception as e:
-            raise ValueError(f"Failed to load universe for fitted coords extraction: {e}")
+            raise ValueError(f"Failed to load universe for fitted coords extraction: {e}") from e
 
         ag = u.select_atoms(self.selection)
         num_features = ag.n_atoms * 3
 
         try:
             coord_list = np.zeros((u.trajectory.n_frames, num_features), dtype=np.float32)
-            for j, ts in enumerate(u.trajectory):
+            for j, _ts in enumerate(u.trajectory):
                 # Align the current frame in memory to the reference structure
                 align.alignto(u, ref, select=self.selection)
                 # Store the flattened coordinates of the selection
@@ -86,7 +85,7 @@ class FeatureExtractor:
         try:
             u = _load_universe(self.topology, trajectories)
         except Exception as e:
-            raise ValueError(f"Failed to load universe for AIB9 phi/psi extraction: {e}")
+            raise ValueError(f"Failed to load universe for AIB9 phi/psi extraction: {e}") from e
 
         residues = list(u.select_atoms("resname AIB").residues)
         if len(residues) != 9:
@@ -116,7 +115,7 @@ class FeatureExtractor:
             values = np.zeros((u.trajectory.n_frames, 18), dtype=np.float32)
             for frame_index, ts in enumerate(u.trajectory):
                 row = []
-                for phi_group, psi_group in zip(phi_atoms, psi_atoms):
+                for phi_group, psi_group in zip(phi_atoms, psi_atoms, strict=False):
                     phi = calc_dihedrals(
                         phi_group[0].positions,
                         phi_group[1].positions,
@@ -146,16 +145,16 @@ class FeatureExtractor:
             u = _load_universe(self.topology, trajectories)
             ref = _load_universe(self.topology, reference_pdb)
         except Exception as e:
-            raise ValueError(f"Failed to load universe for Rg/RMSD: {e}")
+            raise ValueError(f"Failed to load universe for Rg/RMSD: {e}") from e
 
         protein = u.select_atoms("protein")
 
         try:
             # Calculate Rg
             rg_values = np.zeros(u.trajectory.n_frames, dtype=np.float32)
-            for j, ts in enumerate(u.trajectory):
+            for j, _ts in enumerate(u.trajectory):
                 rg_values[j] = protein.radius_of_gyration()
-    
+
             # Calculate RMSD
             # Default to CA backbone for stable RMSD
             R = rms.RMSD(u, ref, select="protein", groupselections=["name CA"])
@@ -171,9 +170,8 @@ class FeatureExtractor:
 
     def extract_positions_by_indices(self, trajectories: list[str], indices: list[int]) -> list:
         """Return full-system OpenMM positions for selected global frame indices."""
-        from openmm import Vec3  # type: ignore
+        from MDAnalysis.coordinates.XTC import XTCReader  # type: ignore
         from openmm.unit import nanometer  # type: ignore
-        from MDAnalysis.coordinates.XTC import XTCReader # type: ignore
 
         # Map global indices to their original order to return them correctly
         sorted_requests = sorted(list(enumerate(indices)), key=lambda x: x[1])
@@ -187,11 +185,11 @@ class FeatureExtractor:
             for original_order, target_index in sorted_requests:
                 if target_index < 0:
                     raise IndexError(f"Spawn frame index {target_index} cannot be negative.")
-                
+
                 while True:
                     if traj_idx >= len(trajectories):
                         raise IndexError(f"Spawn frame index {target_index} is outside trajectory range.")
-                        
+
                     # Compute length extremely fast without parsing topology
                     if str(trajectories[traj_idx]).endswith(".xtc"):
                         with XTCReader(trajectories[traj_idx]) as reader:

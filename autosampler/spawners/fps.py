@@ -1,4 +1,3 @@
-from typing import Optional
 
 import numpy as np
 
@@ -17,7 +16,7 @@ class FPSSpawner(Spawner):
     def __init__(
         self,
         mode: str = "explore",
-        target: Optional[list] = None,
+        target: list | None = None,
         **_,
     ):
         self.mode = mode

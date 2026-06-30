@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from autosampler.binning.spatial import BinTable, RegularBinner
+
 from .base import Spawner, SpawnerFactory
 
 

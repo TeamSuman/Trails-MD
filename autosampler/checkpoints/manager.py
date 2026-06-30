@@ -1,9 +1,10 @@
 import logging
 import os
 import pickle
-import torch
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
+
+import torch
 
 # On-disk checkpoint format version. Bump when the layout changes; ``load``
 # tolerates older checkpoints (a missing version file is treated as v1).
@@ -27,7 +28,7 @@ def _atomic_pickle(obj: Any, path: Path) -> None:
     os.replace(tmp, path)
 
 
-def reconstruct_history(checkpoint_root: Path, iteration: int) -> Dict[Any, Any]:
+def reconstruct_history(checkpoint_root: Path, iteration: int) -> dict[Any, Any]:
     """Merge the per-checkpoint delta ``history.pkl`` files (for all iterations
     ``<= iteration``) into the full cumulative history.
 
@@ -42,7 +43,7 @@ def reconstruct_history(checkpoint_root: Path, iteration: int) -> Dict[Any, Any]
         and path.name.removeprefix("iter_").isdigit()
         and int(path.name.removeprefix("iter_")) <= iteration
     )
-    full: Dict[Any, Any] = {}
+    full: dict[Any, Any] = {}
     for it in iters:
         hist_file = checkpoint_root / f"iter_{it}" / "history.pkl"
         if not hist_file.exists():
@@ -70,9 +71,9 @@ class CheckpointManager:
         iteration: int,
         space_model: Any,
         scaler: Any,
-        bin_state: Dict[str, Any],
-        history: Dict[str, Any],
-        sampler_state: Dict[str, Any] | None = None,
+        bin_state: dict[str, Any],
+        history: dict[str, Any],
+        sampler_state: dict[str, Any] | None = None,
     ) -> None:
         """Save a complete state snapshot."""
         iter_dir = self.checkpoint_dir / f"iter_{iteration}"
@@ -122,7 +123,7 @@ class CheckpointManager:
 
     def load(
         self, iteration: int, space_model: Any = None
-    ) -> Tuple[Any, Any, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    ) -> tuple[Any, Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
         """Restore the state exactly as it was at the specified iteration."""
         iter_dir = self.checkpoint_dir / f"iter_{iteration}"
         if not iter_dir.exists():
@@ -154,7 +155,7 @@ class CheckpointManager:
         # 2. Load scaler
         with open(iter_dir / "scaler.pkl", "rb") as f:
             scaler = pickle.load(f)
-            
+
         # 3. Load bins & reconstruct the full (delta-checkpointed) history.
         with open(iter_dir / "bin_state.pkl", "rb") as f:
             bin_state = pickle.load(f)

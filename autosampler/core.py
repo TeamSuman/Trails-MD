@@ -1,10 +1,10 @@
-import logging
-import warnings
-from pathlib import Path
 import importlib.util
 import json
+import logging
 import shutil
 import sys
+import warnings
+from pathlib import Path
 
 # Suppress common non-critical warnings from dependencies
 warnings.filterwarnings(
@@ -12,7 +12,7 @@ warnings.filterwarnings(
 )
 warnings.filterwarnings("ignore", message="Reload offsets from trajectory")
 warnings.filterwarnings("ignore", message=".*Reader has no dt information.*")
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 from pydantic import ValidationError
@@ -33,7 +33,7 @@ from autosampler.workflows.parallel import run_iteration_parallel
 class AutoSamplerCore:
     """Main orchestrator for the AutoSampler framework."""
 
-    def __init__(self, config_dict: Dict[str, Any]):
+    def __init__(self, config_dict: dict[str, Any]):
         try:
             self.config = AutoSamplerConfig(**config_dict)
         except ValidationError as e:
@@ -241,7 +241,7 @@ class AutoSamplerCore:
     def latest_checkpoint_iteration(self) -> int:
         return self.checkpoint_manager.latest_iteration()
 
-    def resume_walkers(self) -> List[Any]:
+    def resume_walkers(self) -> list[Any]:
         """Rebuild next walkers from the latest restored checkpoint history."""
         if not self.history:
             return [self.engine.positions for _ in range(self.config.spawning.walker)]
@@ -279,38 +279,40 @@ class AutoSamplerCore:
         )
 
 
-    def generate_initial_walkers(self) -> List[Any]:
+    def generate_initial_walkers(self) -> list[Any]:
         if not self.config.system.initial_trajectory:
             return [self.engine.positions for _ in range(self.config.spawning.walker)]
-            
+
         import logging
-        import numpy as np
         import random
         from pathlib import Path
+
         import MDAnalysis as mda
+        import numpy as np
+
         from autosampler.spaces import FeatureExtractor
-        
+
         traj_path = str(Path(self.config.system.initial_trajectory).resolve())
         logging.info(f"Initializing walkers from trajectory: {traj_path}")
-        
+
         trajectory_topology = (
             self.config.system.trajectory_topology_file or self.config.system.top_file
         )
-        
+
         u = mda.Universe(trajectory_topology, traj_path)
         n_frames = len(u.trajectory)
         n_walkers = self.config.spawning.walker
-        
+
         if n_frames == 0:
             raise ValueError(f"Initial trajectory {traj_path} contains 0 frames.")
-            
+
         points = None
         if hasattr(self, "_extract_physical_cvs") and self.config.system.project_file:
             try:
                 points = self._extract_physical_cvs([traj_path])
             except Exception as e:
                 logging.warning(f"Failed to extract CVs from initial trajectory, falling back to random sampling: {e}")
-                
+
         if points is not None and len(points) > n_walkers:
             logging.info(f"Selecting {n_walkers} starting walkers from {n_frames} frames using spawning scheme...")
             try:
@@ -328,7 +330,7 @@ class AutoSamplerCore:
             else:
                 logging.info(f"Only {n_frames} frames available for {n_walkers} walkers; replicating randomly.")
                 spawn_indices = [random.choice(range(n_frames)) for _ in range(n_walkers)]
-                
+
         feature_extractor = FeatureExtractor(
             topology=trajectory_topology,
             selection=self.config.system.feature_selection,
@@ -336,7 +338,7 @@ class AutoSamplerCore:
         walkers = feature_extractor.extract_positions_by_indices(
             [traj_path], spawn_indices
         )
-        
+
         if points is not None:
             from autosampler.core import build_frame_records
             frames = build_frame_records(
@@ -346,9 +348,9 @@ class AutoSamplerCore:
                 walker_parents=["initial"],
                 expected_frames=n_frames,
             )
-            
+
             next_walker_parents = [frames[idx]["key"] for idx in spawn_indices]
-            
+
             self.history[-1] = {
                 "projection": points,
                 "spawning_scheme": "initial",
@@ -360,7 +362,7 @@ class AutoSamplerCore:
             }
             self.walker_parents = next_walker_parents
             logging.info(f"Injected {n_frames} frames from initial trajectory into permanent history (iteration -1).")
-            
+
         return walkers
 
     def _traj_suffix(self) -> str:
@@ -371,7 +373,7 @@ class AutoSamplerCore:
             )
         return "xtc"
 
-    def run_iteration(self, walkers: List[Any]):
+    def run_iteration(self, walkers: list[Any]):
         """Run a single adaptive sampling iteration."""
 
         # 1. Run production MD
@@ -691,8 +693,8 @@ class AutoSamplerCore:
             "convergence_reason": self.convergence_reason,
         }
 
-    def _sampling_trajectories(self, current_trajectories: List[str]) -> List[str]:
-        trajectories: List[str] = []
+    def _sampling_trajectories(self, current_trajectories: list[str]) -> list[str]:
+        trajectories: list[str] = []
         for iteration in sorted(self.history):
             entry = self.history[iteration]
             if not isinstance(entry, dict) or entry.get("projection") is None:
@@ -708,9 +710,9 @@ class AutoSamplerCore:
         return trajectories
 
     def _sampling_frame_records(
-        self, current_frame_records: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        records: List[Dict[str, Any]] = []
+        self, current_frame_records: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
         for iteration in sorted(self.history):
             entry = self.history[iteration]
             if not isinstance(entry, dict) or entry.get("projection") is None:
@@ -735,7 +737,7 @@ class AutoSamplerCore:
 
     def _infer_iteration_trajectories(
         self, iteration: int, projection: Any
-    ) -> List[str]:
+    ) -> list[str]:
         projection = np.asarray(projection)
         frames_per_walker = self.config.spawning.step // self.config.spawning.stride
         if frames_per_walker <= 0:
@@ -801,7 +803,7 @@ class AutoSamplerCore:
         if isinstance(latest_entry, dict):
             self.walker_parents = list(latest_entry.get("next_walker_parents") or [])
 
-    def _checkpoint_state(self) -> Dict[str, Any]:
+    def _checkpoint_state(self) -> dict[str, Any]:
         return {
             "n_bins": list(self.config.n_bins),
             "voronoi_clusters": self.config.spawning.voronoi_clusters,
@@ -818,7 +820,7 @@ class AutoSamplerCore:
             "retrain_controller": self.retrain_controller.state_dict(),
         }
 
-    def _restore_sampler_state(self, state: Dict[str, Any] | None) -> None:
+    def _restore_sampler_state(self, state: dict[str, Any] | None) -> None:
         state = state or {}
         if "n_bins" in state:
             self.config.n_bins = list(state["n_bins"])
@@ -842,7 +844,7 @@ class AutoSamplerCore:
             self.msm_monitor.load_state_dict(state["msm_monitor"])
 
     @staticmethod
-    def _trajectory_file_problems(trajectories: List[str]) -> list[str]:
+    def _trajectory_file_problems(trajectories: list[str]) -> list[str]:
         bad: list[str] = []
         for path in trajectories:
             p = Path(path)
@@ -853,7 +855,7 @@ class AutoSamplerCore:
         return bad
 
     @staticmethod
-    def _validate_trajectory_files(trajectories: List[str]) -> None:
+    def _validate_trajectory_files(trajectories: list[str]) -> None:
         """Ensure each expected trajectory exists and is non-empty before reading.
 
         A walker can report success yet leave a missing or truncated file (disk
@@ -869,7 +871,7 @@ class AutoSamplerCore:
 
     @staticmethod
     def _validate_sampling_trajectories(
-        trajectories: List[str], context: str = "sampling"
+        trajectories: list[str], context: str = "sampling"
     ) -> None:
         """Ensure cumulative trajectories are still available before spawning.
 
@@ -921,7 +923,7 @@ class AutoSamplerCore:
         return np.asarray(features)[:, self.feature_selection_indices]
 
     def _extract_feature_type(
-        self, feature_extractor: FeatureExtractor, trajectories: List[str], ftype: str
+        self, feature_extractor: FeatureExtractor, trajectories: list[str], ftype: str
     ) -> np.ndarray:
         if ftype == "phi_psi":
             return feature_extractor.extract_aib9_phi_psi(trajectories)
@@ -930,7 +932,7 @@ class AutoSamplerCore:
         return feature_extractor.extract_pairwise_distances(trajectories)
 
     def _extract_adaptive_features(
-        self, feature_extractor: FeatureExtractor, trajectories: List[str]
+        self, feature_extractor: FeatureExtractor, trajectories: list[str]
     ) -> np.ndarray:
         """Extract input features, optionally ranking candidate feature *types* by VAMP-2."""
         fs_cfg = getattr(self.config, "feature_selection", None)
@@ -955,7 +957,7 @@ class AutoSamplerCore:
         from autosampler.spaces.feature_selection import rank_candidates
 
         n_frames = self.config.spawning.step // self.config.spawning.stride
-        extracted: Dict[str, np.ndarray] = {}
+        extracted: dict[str, np.ndarray] = {}
         for ftype in candidates:
             try:
                 extracted[ftype] = self._extract_feature_type(
@@ -1047,7 +1049,7 @@ class AutoSamplerCore:
             selection.score,
         )
 
-    def _extract_physical_cvs(self, trajectories: List[str]) -> np.ndarray:
+    def _extract_physical_cvs(self, trajectories: list[str]) -> np.ndarray:
         """Load the user project file and extract physical CVs for ``trajectories``.
 
         Centralises the ``project_file`` import + ``extract_cvs`` call that was
@@ -1067,7 +1069,7 @@ class AutoSamplerCore:
             conf_file=self.config.system.conf_file,
         )
 
-    def _collect_msm_trajectories(self) -> List[Any]:
+    def _collect_msm_trajectories(self) -> list[Any]:
         """Split cumulative history projections into continuous per-walker trajectories.
 
         Each short walker is one continuous trajectory; transition counts are
@@ -1075,7 +1077,7 @@ class AutoSamplerCore:
         dropped because they carry no transitions.
         """
         frames_per_walker = self.config.spawning.step // self.config.spawning.stride
-        trajs: List[Any] = []
+        trajs: list[Any] = []
         for iteration in sorted(self.history):
             entry = self.history[iteration]
             if not isinstance(entry, dict):
@@ -1246,7 +1248,7 @@ class AutoSamplerCore:
         new_bins = [min(int(b * 1.15), max_bins) for b in old_bins]
         new_bins = [
             min(old + 1, max_bins) if new <= old and old < max_bins else new
-            for old, new in zip(old_bins, new_bins)
+            for old, new in zip(old_bins, new_bins, strict=False)
         ]
         if new_bins == old_bins:
             return False
@@ -1451,13 +1453,13 @@ class AutoSamplerCore:
         iteration: int,
         runner_time: float,
         other_time: float,
-        success: List[bool],
+        success: list[bool],
         points: Any,
         occupied_bins: int | None,
         total_bins: int | None,
         cumulative_frames: int | None,
-        spawn_indices: List[int],
-        trajectories: List[str],
+        spawn_indices: list[int],
+        trajectories: list[str],
     ) -> None:
         points_array = np.asarray(points)
         frames_this_iteration = len(points_array)

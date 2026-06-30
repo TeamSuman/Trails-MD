@@ -1,12 +1,13 @@
-import torch
-import numpy as np
 from typing import Any
 
+import numpy as np
+import torch
 from deeptime.decomposition.deep import TVAE
 from deeptime.util.data import TrajectoryDataset
 from torch.utils.data import DataLoader
+
 from .scalers import TrajectoryScaler
-from .tvae import TVAEBottleneckEncoder, TVAEBottleneckDecoder
+from .tvae import TVAEBottleneckDecoder, TVAEBottleneckEncoder
 
 
 class AdaptiveSpaceModel:
@@ -179,8 +180,8 @@ class AdaptiveSpaceModel:
             ]
             import lightning as pl
             from mlcolvar.cvs import DeepTICA
+            from mlcolvar.data import DictDataset, DictModule
             from mlcolvar.utils.timelagged import create_timelagged_dataset
-            from mlcolvar.data import DictModule, DictDataset
 
             data_dict = {}
             for traj in traj_list:

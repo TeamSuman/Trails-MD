@@ -122,3 +122,5 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # re-exports
 "tests/*" = ["E402"]  # importorskip before imports
+"autosampler/core.py" = ["E402"]  # warnings.filterwarnings must precede imports
+"autosampler/engines/openmm.py" = ["F403", "F405"]  # `from openmm import *` API

@@ -1,0 +1,3 @@
+include README.md CHANGELOG.md LICENSE CITATION.cff env.yml
+recursive-include docs *.md
+exclude AutoSampler_Changelog.pdf AutoSampler_Review.pdf
