@@ -31,7 +31,7 @@ system:
 # ---- Engine: the MD backend and thermodynamic settings ---------------------
 engine:
   md_engine: openmm             # openmm | gromacs | amber
-  platform_name: CUDA           # CUDA | CPU | OpenCL | Reference  (OpenMM)
+  platform_name: CUDA           # use CPU if OpenMM has no registered CUDA platform
   precision: mixed              # mixed | single | double
   temperature: 300.0            # Kelvin
   pressure: 1.0                 # bar

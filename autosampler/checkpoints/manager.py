@@ -59,8 +59,15 @@ class CheckpointManager:
         # 3. Save Bins & Spawn History
         with open(iter_dir / "bin_state.pkl", "wb") as f:
             pickle.dump(bin_state, f)
+            
+        # Delta Checkpointing: Only save history since the last checkpoint
+        last_ckpt = self._get_latest_checkpoint_before(iteration)
+        delta_history = {
+            k: v for k, v in history.items() if k > last_ckpt and k <= iteration
+        }
         with open(iter_dir / "history.pkl", "wb") as f:
-            pickle.dump(history, f)
+            pickle.dump(delta_history, f)
+            
         if sampler_state is not None:
             with open(iter_dir / "sampler_state.pkl", "wb") as f:
                 pickle.dump(sampler_state, f)
@@ -103,8 +110,31 @@ class CheckpointManager:
         # 3. Load bins & history
         with open(iter_dir / "bin_state.pkl", "rb") as f:
             bin_state = pickle.load(f)
+            
         with open(iter_dir / "history.pkl", "rb") as f:
             history = pickle.load(f)
+
+        # Reconstruct full history for Delta Checkpointing
+        checkpoint_dirs = [
+            path
+            for path in self.checkpoint_dir.glob("iter_*")
+            if path.is_dir() and path.name.removeprefix("iter_").isdigit()
+        ]
+        previous_iters = sorted([
+            int(path.name.removeprefix("iter_"))
+            for path in checkpoint_dirs
+            if int(path.name.removeprefix("iter_")) < iteration
+        ], reverse=True)
+        
+        for prev_iter in previous_iters:
+            prev_hist_file = self.checkpoint_dir / f"iter_{prev_iter}" / "history.pkl"
+            if prev_hist_file.exists():
+                with open(prev_hist_file, "rb") as f:
+                    part_hist = pickle.load(f)
+                    if isinstance(part_hist, dict):
+                        for k, v in part_hist.items():
+                            if k not in history:
+                                history[k] = v
 
         state_path = iter_dir / "sampler_state.pkl"
         if state_path.exists():
@@ -144,3 +174,16 @@ class CheckpointManager:
                 f"No checkpoints found under {self.checkpoint_dir}"
             )
         return max(int(path.name.removeprefix("iter_")) for path in checkpoint_dirs)
+
+    def _get_latest_checkpoint_before(self, iteration: int) -> int | float:
+        checkpoint_dirs = [
+            path
+            for path in self.checkpoint_dir.glob("iter_*")
+            if path.is_dir() and path.name.removeprefix("iter_").isdigit()
+        ]
+        previous_iters = sorted([
+            int(path.name.removeprefix("iter_"))
+            for path in checkpoint_dirs
+            if int(path.name.removeprefix("iter_")) < iteration
+        ], reverse=True)
+        return previous_iters[0] if previous_iters else -float('inf')

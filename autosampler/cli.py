@@ -80,9 +80,7 @@ def run(
             f"iter_{checkpoint_iteration}; next iteration is {sampler.iteration}."
         )
     else:
-        walkers = [
-            sampler.engine.positions for _ in range(sampler.config.spawning.walker)
-        ]
+        walkers = sampler.generate_initial_walkers()
 
     completed_iterations = 0
     for iteration in range(iterations):

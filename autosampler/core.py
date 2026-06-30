@@ -263,6 +263,7 @@ class AutoSamplerCore:
             raise RuntimeError(
                 f"Checkpoint history entry {latest_iteration} has no trajectories."
             )
+        self._validate_sampling_trajectories(trajectories, context="resume")
 
         trajectory_topology = (
             self.config.system.trajectory_topology_file or self.config.system.top_file
@@ -275,6 +276,91 @@ class AutoSamplerCore:
             trajectories,
             list(spawn_indices),
         )
+
+
+    def generate_initial_walkers(self) -> List[Any]:
+        if not self.config.system.initial_trajectory:
+            return [self.engine.positions for _ in range(self.config.spawning.walker)]
+            
+        import logging
+        import numpy as np
+        import random
+        from pathlib import Path
+        import MDAnalysis as mda
+        from autosampler.spaces import FeatureExtractor
+        
+        traj_path = str(Path(self.config.system.initial_trajectory).resolve())
+        logging.info(f"Initializing walkers from trajectory: {traj_path}")
+        
+        trajectory_topology = (
+            self.config.system.trajectory_topology_file or self.config.system.top_file
+        )
+        
+        u = mda.Universe(trajectory_topology, traj_path)
+        n_frames = len(u.trajectory)
+        n_walkers = self.config.spawning.walker
+        
+        if n_frames == 0:
+            raise ValueError(f"Initial trajectory {traj_path} contains 0 frames.")
+            
+        points = None
+        if hasattr(self, "_extract_physical_cvs") and self.config.system.project_file:
+            try:
+                points = self._extract_physical_cvs([traj_path])
+            except Exception as e:
+                logging.warning(f"Failed to extract CVs from initial trajectory, falling back to random sampling: {e}")
+                
+        if points is not None and len(points) > n_walkers:
+            logging.info(f"Selecting {n_walkers} starting walkers from {n_frames} frames using spawning scheme...")
+            try:
+                # the spawner might require history for some things, but mostly just points.
+                # Since history is empty, pass it empty.
+                spawn_indices = self.spawner.sample(points, n_walkers, history={})
+            except Exception as e:
+                logging.warning(f"Spawning scheme failed on initial trajectory: {e}. Falling back to uniform.")
+                spawn_indices = list(np.linspace(0, n_frames - 1, n_walkers, dtype=int))
+        else:
+            if n_frames >= n_walkers:
+                logging.info(f"Using uniform sampling for {n_walkers} starting walkers from {n_frames} frames.")
+                spawn_indices = list(np.linspace(0, n_frames - 1, n_walkers, dtype=int))
+                print("EXACT SPAWN INDICES:", spawn_indices)
+            else:
+                logging.info(f"Only {n_frames} frames available for {n_walkers} walkers; replicating randomly.")
+                spawn_indices = [random.choice(range(n_frames)) for _ in range(n_walkers)]
+                
+        feature_extractor = FeatureExtractor(
+            topology=trajectory_topology,
+            selection=self.config.system.feature_selection,
+        )
+        walkers = feature_extractor.extract_positions_by_indices(
+            [traj_path], spawn_indices
+        )
+        
+        if points is not None:
+            from autosampler.core import build_frame_records
+            frames = build_frame_records(
+                iteration=-1,
+                trajectories=[traj_path],
+                points=np.asarray(points),
+                walker_parents=["initial"],
+                expected_frames=n_frames,
+            )
+            
+            next_walker_parents = [frames[idx]["key"] for idx in spawn_indices]
+            
+            self.history[-1] = {
+                "projection": points,
+                "spawning_scheme": "initial",
+                "trajectories": [traj_path],
+                "spawn_indices": list(spawn_indices),
+                "frames": frames,
+                "walker_parents": ["initial"],
+                "next_walker_parents": next_walker_parents,
+            }
+            self.walker_parents = next_walker_parents
+            logging.info(f"Injected {n_frames} frames from initial trajectory into permanent history (iteration -1).")
+            
+        return walkers
 
     def _traj_suffix(self) -> str:
         if self.config.engine.md_engine == "amber":
@@ -474,6 +560,7 @@ class AutoSamplerCore:
             walker_parents=self.walker_parents,
             expected_frames=expected_frames,
         )
+        self._prune_unusable_history_trajectories()
         # Hand the MSM-guided spawner the previous iteration's MSM + its clustering
         # (consistent with each other; the spawner falls back to least-counts when
         # either is None, e.g. iteration 0 or just after a resume).
@@ -486,6 +573,10 @@ class AutoSamplerCore:
             points, self.config.spawning.walker, history=self.history
         )
         sampling_trajectories = self._sampling_trajectories(trajectories)
+        self._validate_sampling_trajectories(
+            sampling_trajectories,
+            context=f"spawning iteration {self.iteration}",
+        )
         sampling_frame_records = self._sampling_frame_records(current_frame_records)
         next_walker_parents = [
             map_global_frame(sampling_frame_records, index)["key"]
@@ -750,13 +841,7 @@ class AutoSamplerCore:
             self.msm_monitor.load_state_dict(state["msm_monitor"])
 
     @staticmethod
-    def _validate_trajectory_files(trajectories: List[str]) -> None:
-        """Ensure each expected trajectory exists and is non-empty before reading.
-
-        A walker can report success yet leave a missing or truncated file (disk
-        full, killed writer); catching it here gives a clear error instead of an
-        opaque downstream parse failure.
-        """
+    def _trajectory_file_problems(trajectories: List[str]) -> list[str]:
         bad: list[str] = []
         for path in trajectories:
             p = Path(path)
@@ -764,10 +849,68 @@ class AutoSamplerCore:
                 bad.append(f"missing: {path}")
             elif p.stat().st_size == 0:
                 bad.append(f"empty: {path}")
+        return bad
+
+    @staticmethod
+    def _validate_trajectory_files(trajectories: List[str]) -> None:
+        """Ensure each expected trajectory exists and is non-empty before reading.
+
+        A walker can report success yet leave a missing or truncated file (disk
+        full, killed writer); catching it here gives a clear error instead of an
+        opaque downstream parse failure.
+        """
+        bad = AutoSamplerCore._trajectory_file_problems(trajectories)
         if bad:
             joined = "\n  - ".join(bad)
             raise RuntimeError(
                 "Trajectory files are not usable for CV extraction:\n  - " + joined
+            )
+
+    @staticmethod
+    def _validate_sampling_trajectories(
+        trajectories: List[str], context: str = "sampling"
+    ) -> None:
+        """Ensure cumulative trajectories are still available before spawning.
+
+        Current iteration outputs are validated before CV extraction. Spawning can
+        also sample frames from older history, especially after resume, so check
+        the complete sampling pool before handing paths to MDAnalysis.
+        """
+        try:
+            AutoSamplerCore._validate_trajectory_files(trajectories)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"Cannot extract walker start coordinates during {context}; "
+                "one or more sampled-history trajectory files are missing or empty. "
+                "Restore the listed files, remove the incomplete run directory, or "
+                "resume from a checkpoint whose trajectory files are present.\n"
+                f"{exc}"
+            ) from exc
+
+    def _prune_unusable_history_trajectories(self) -> None:
+        """Drop old history entries whose trajectory files can no longer be read."""
+        dropped: list[tuple[int, list[str]]] = []
+        for iteration in sorted(list(self.history)):
+            entry = self.history[iteration]
+            if not isinstance(entry, dict) or entry.get("projection") is None:
+                continue
+            stored = entry.get("trajectories")
+            trajectories = (
+                [str(path) for path in stored]
+                if stored
+                else self._infer_iteration_trajectories(iteration, entry["projection"])
+            )
+            problems = self._trajectory_file_problems(trajectories)
+            if problems:
+                dropped.append((iteration, problems))
+                del self.history[iteration]
+
+        for iteration, problems in dropped:
+            logging.warning(
+                "Dropping iteration %s from sampling history because trajectory "
+                "files are missing or empty: %s",
+                iteration,
+                "; ".join(problems[:5]),
             )
 
     def _fs_apply(self, features: np.ndarray) -> np.ndarray:

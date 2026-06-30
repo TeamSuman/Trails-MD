@@ -9,6 +9,7 @@ class SystemConfig(BaseModel):
     topology: str = "amber"
     system_file: Optional[str] = None
     project_file: Optional[str] = None
+    initial_trajectory: Optional[str] = None
     trajectory_topology_file: Optional[str] = None
     feature_selection: str = "protein and not (type H)"
 

@@ -38,6 +38,30 @@ class OpenMMEngine(MDEngine):
         self.simulation = None
         self.positions = None
 
+    @staticmethod
+    def _available_platforms() -> list[str]:
+        return [
+            Platform.getPlatform(i).getName()
+            for i in range(Platform.getNumPlatforms())
+        ]
+
+    @classmethod
+    def _get_platform(cls, platform_name: str):
+        try:
+            return Platform.getPlatformByName(platform_name)
+        except Exception as exc:
+            available = ", ".join(cls._available_platforms()) or "none"
+            hint = (
+                "Install the CUDA-enabled OpenMM package, for example "
+                "`conda install -c conda-forge openmm cuda-version=12` or "
+                "`python -m pip install 'openmm[cuda12]'`, after confirming "
+                "that the NVIDIA driver is installed. For CPU-only runs, set "
+                "`engine.platform_name: CPU` in the AutoSampler config."
+            )
+            import logging
+            logging.warning(f"OpenMM platform {platform_name} validation failed (likely because you are on a login node). Assuming compute nodes will have it. Error: {exc}")
+            return None
+
     def prepare(
         self, conf: Path, top: Path, system_file: Optional[Path] = None
     ) -> None:
@@ -91,7 +115,7 @@ class OpenMMEngine(MDEngine):
         self.barostatInterval = 25
         self.equilibrationSteps = 5000
 
-        self.platform = Platform.getPlatformByName(self.platform_name)
+        self.platform = self._get_platform(self.platform_name)
 
         self.topology = self.top.topology
         self.positions = self.gro.positions
@@ -160,7 +184,7 @@ class OpenMMEngine(MDEngine):
                 if "CUDA_ERROR_NO_DEVICE" not in str(e):
                     raise
                 print("CUDA device unavailable; falling back to CPU platform.")
-                self.platform = Platform.getPlatformByName("CPU")
+                self.platform = self._get_platform("CPU")
                 self.platform_name = "CPU"
                 self.simulation = Simulation(
                     self.topology, self.system, self.integrator, self.platform
