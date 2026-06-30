@@ -269,6 +269,10 @@ class ExecutionConfig(BaseModel):
     """
 
     backend: str = "local"  # "local" | "slurm" | "pbs"
+    # Local backend: kill a walker (and abort the rest of the batch) if it runs
+    # longer than this many seconds. None disables the timeout (default). Guards
+    # against a hung in-process OpenMM walker stalling the campaign forever.
+    walker_timeout: Optional[float] = None
     # Scheduler resource requests (per array task = one walker).
     partition: Optional[str] = None  # SLURM partition / PBS queue
     account: Optional[str] = None

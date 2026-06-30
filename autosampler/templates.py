@@ -135,6 +135,7 @@ binning:
 # ---- Execution: where walkers run ------------------------------------------
 execution:
   backend: local                        # local | slurm | pbs
+  # walker_timeout: 3600                 # local: kill a walker after N seconds (hang guard)
   # --- scheduler settings (slurm/pbs) ---
   # partition: gpu
   # account: my_alloc

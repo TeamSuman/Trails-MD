@@ -109,6 +109,36 @@ def test_local_backend_runs_all_walkers(tmp_path, monkeypatch):
     assert results == [True, False, True]
 
 
+class _HangingExecutor:
+    """Hands out futures that never complete, to simulate a hung walker."""
+
+    def __init__(self, *a, **k):
+        self._processes = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def submit(self, fn, *args):
+        return Future()  # never set → never done
+
+
+def test_local_backend_walker_timeout(tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setattr(local_mod, "ProcessPoolExecutor", _HangingExecutor)
+    backend = ExecutionBackendFactory.get(
+        "local", gpu_ids=[0], max_workers=2, walker_timeout=0.3
+    )
+    start = time.monotonic()
+    results = backend.execute(_tasks(tmp_path, ["hang", "hang"]))
+    elapsed = time.monotonic() - start
+    assert results == [False, False]  # timed-out batch reported as failed
+    assert elapsed < 5.0  # and it did not hang
+
+
 # ── fake scheduler command runner ───────────────────────────────────────────
 def _fake_runner(submit_id="4242"):
     def runner(cmd, timeout):
