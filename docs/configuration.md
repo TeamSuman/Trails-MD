@@ -53,7 +53,7 @@ at startup. Below, only non-obvious defaults are noted — see
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `adaptive_feature_type` | `distances` | `distances` \| `fitted_coords` \| `phi_psi`. |
+| `adaptive_feature_type` | `distances` | `distances` \| `fitted_coords` \| `phi_psi`. **Note:** `phi_psi` is currently specific to the AIB9 peptide (it expects 9 `resname AIB` residues) and will raise on other systems — use `distances` or `fitted_coords` for general systems. |
 | `retrain_freq` | `1` | Retrain the CV every N iterations (`fixed` policy). |
 | `retrain_policy` | `fixed` | `fixed` or `vamp_adaptive` (retrain on VAMP-2 drop). |
 | `vamp_retrain_tol` | `0.1` | Relative VAMP-2 drop that triggers a retrain. |

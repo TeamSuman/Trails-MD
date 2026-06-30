@@ -4,11 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autosampler"
-version = "2.0.0"
+dynamic = ["version"]
 description = "Adaptive collective-variable sampling framework for molecular dynamics."
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [
-  { name = "AutoSampler contributors" }
+  # TODO(release): confirm the full author list, affiliations, and ORCIDs for the
+  # publication (mirror these in CITATION.cff).
+  { name = "Dibyendu Maity", email = "dibyendumaity1999@bose.res.in" },
+  { name = "Suman Chakrabarty", email = "chakrabarty.suman@gmail.com" },
+]
+keywords = [
+  "molecular-dynamics", "adaptive-sampling", "markov-state-model",
+  "collective-variables", "enhanced-sampling", "openmm",
 ]
 dependencies = [
   "numpy>=1.23",
@@ -23,7 +32,7 @@ dependencies = [
   "deeptime>=0.4",
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
@@ -34,6 +43,13 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Chemistry",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
+
+[project.urls]
+Homepage = "https://github.com/TeamSuman/AutoSampler"
+Repository = "https://github.com/TeamSuman/AutoSampler"
+Documentation = "https://github.com/TeamSuman/AutoSampler/tree/main/docs"
+Issues = "https://github.com/TeamSuman/AutoSampler/issues"
+Changelog = "https://github.com/TeamSuman/AutoSampler/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 deep-tica = [
@@ -61,6 +77,9 @@ exclude = ["examples*", "tests*", "latex*"]
 
 [tool.setuptools]
 include-package-data = false
+
+[tool.setuptools.dynamic]
+version = { attr = "autosampler.__version__" }  # single source: autosampler/__init__.py
 
 [project.scripts]
 autosampler = "autosampler.cli:main"
