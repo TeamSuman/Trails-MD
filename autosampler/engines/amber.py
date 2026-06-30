@@ -22,7 +22,6 @@ import shutil
 import subprocess
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -59,7 +58,7 @@ def amber_trajectory_suffix(
 
 
 @lru_cache(maxsize=1)
-def _find_libnvjitlink_dir() -> Optional[str]:
+def _find_libnvjitlink_dir() -> str | None:
     """Find the directory containing libnvJitLink.so.12 dynamically."""
     import sys
 
@@ -139,8 +138,8 @@ class AmberEngine(MDEngine):
         dt: float = 0.002,
         npt: bool = False,
         amber_executable: str = "pmemd",
-        amber_input_file: Optional[str] = None,
-        amber_extra_args: Optional[list[str]] = None,
+        amber_input_file: str | None = None,
+        amber_extra_args: list[str] | None = None,
         amber_trajectory_format: str = "auto",
         **kwargs,  # absorb OpenMM-specific kwargs (precision, platform_name, …)
     ):
@@ -155,16 +154,16 @@ class AmberEngine(MDEngine):
         self._resolved_trajectory_format()
 
         # Set after prepare()
-        self.topology_file: Optional[Path] = None
-        self.start_coords_file: Optional[Path] = None
-        self.positions: Optional[str] = None  # str path for first-iteration walkers
+        self.topology_file: Path | None = None
+        self.start_coords_file: Path | None = None
+        self.positions: str | None = None  # str path for first-iteration walkers
 
     # ------------------------------------------------------------------
     # MDEngine interface
     # ------------------------------------------------------------------
 
     def prepare(
-        self, conf: Path, top: Path, system_file: Optional[Path] = None
+        self, conf: Path, top: Path, system_file: Path | None = None
     ) -> None:
         """Validate the Amber topology and coordinate files.
 
@@ -370,7 +369,7 @@ class AmberEngine(MDEngine):
         filepath: str,
         steps: int,
         stride: int,
-        trajectory_format: Optional[str] = None,
+        trajectory_format: str | None = None,
     ) -> None:
         """Write an Amber MD input (``.in``) file.
 
@@ -468,7 +467,7 @@ class AmberEngine(MDEngine):
     def _write_rst7(
         filepath: str,
         positions_ang: np.ndarray,
-        box_ang: Optional[np.ndarray] = None,
+        box_ang: np.ndarray | None = None,
     ) -> None:
         """Write an Amber RST7 restart file (coordinates only, no velocities).
 
@@ -536,7 +535,7 @@ class AmberEngine(MDEngine):
         )
 
     @staticmethod
-    def _openmm_box_to_angstrom(box_vectors) -> Optional[np.ndarray]:
+    def _openmm_box_to_angstrom(box_vectors) -> np.ndarray | None:
         """Convert an OpenMM box-vectors tuple to ``[a, b, c, 90, 90, 90]`` in Angstroms.
 
         Only orthogonal boxes are currently supported; triclinic cells will

@@ -122,6 +122,26 @@ adds a flux-weighted **transition-matrix convergence** gate with
 - Made `autosampler.spaces` import lazily so lightweight modules (e.g. the CV
   registry) import without MDAnalysis / torch.
 
+### Production-readiness hardening (pre-release pass)
+- **Reproducibility:** threaded the configured seed into all learned-CV training
+  (SPIB no longer hardcodes `seed=42`; the torch RNG is reseeded before every
+  `fit`), and `SeedManager` now requests deterministic torch algorithms.
+- **Robustness:** the local backend tolerates a single walker's failure (and adds
+  an opt-in `execution.walker_timeout` hang guard) instead of aborting the batch;
+  delta-checkpoint resume reconstructs the full history (fixing a truncated
+  `autosampler-path`), writes atomically, and tolerates a corrupt delta; fixed a
+  target-mode spawn crash and a deep-TICA device mismatch.
+- **Packaging:** OpenMM is now an optional, lazily-imported backend so the base
+  `pip install` resolves; full PyPI metadata + single-sourced version;
+  `CITATION.cff`; tag-driven PyPI release workflow.
+- **CI/quality:** lint the whole tree (was a hand-picked subset), test on Python
+  3.10–3.12, build the docs in CI.
+- **Docs/examples/tests:** a self-contained CPU-only alanine-dipeptide
+  hello-world; example configs for SPIB / deep-TICA / WE / target / PBS; an
+  examples index; an API reference, references/citations page, and full CLI
+  reference; +23 tests (delta checkpoint, reproducibility, timeout, spawners,
+  paths). Suite 95 → 118.
+
 ### Fixed (Phase 2)
 - Renamed `AdaptiveSpaceModel.fited` → `fitted` (with a backwards-compatible
   loader for old checkpoints).

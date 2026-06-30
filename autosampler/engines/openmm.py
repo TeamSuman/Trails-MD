@@ -2,7 +2,6 @@ import importlib.util
 import inspect
 import os
 from pathlib import Path
-from typing import Optional
 
 from openmm import *
 from openmm.app import *
@@ -23,7 +22,7 @@ class OpenMMEngine(MDEngine):
         precision: str = "mixed",
         npt: bool = False,
         equilibrate: bool = False,
-        gromacs_include_dir: Optional[str] = None,
+        gromacs_include_dir: str | None = None,
         **kwargs,
     ):
         self.temperature_val = temperature
@@ -50,20 +49,13 @@ class OpenMMEngine(MDEngine):
         try:
             return Platform.getPlatformByName(platform_name)
         except Exception as exc:
-            available = ", ".join(cls._available_platforms()) or "none"
-            hint = (
-                "Install the CUDA-enabled OpenMM package, for example "
-                "`conda install -c conda-forge openmm cuda-version=12` or "
-                "`python -m pip install 'openmm[cuda12]'`, after confirming "
-                "that the NVIDIA driver is installed. For CPU-only runs, set "
-                "`engine.platform_name: CPU` in the AutoSampler config."
-            )
+            ", ".join(cls._available_platforms()) or "none"
             import logging
             logging.warning(f"OpenMM platform {platform_name} validation failed (likely because you are on a login node). Assuming compute nodes will have it. Error: {exc}")
             return None
 
     def prepare(
-        self, conf: Path, top: Path, system_file: Optional[Path] = None
+        self, conf: Path, top: Path, system_file: Path | None = None
     ) -> None:
         """Prepare the MD environment, e.g., setup system, topology, forces."""
         gro_file = str(conf)

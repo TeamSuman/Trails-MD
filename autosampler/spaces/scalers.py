@@ -1,9 +1,10 @@
-from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 import numpy as np
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+
 
 class TrajectoryScaler:
     """Scales pairwise feature vectors while preserving shape mappings."""
-    
+
     def __init__(self, scaler_type: str = "minmax"):
         if scaler_type == "minmax":
             self.scaler = MinMaxScaler()

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -7,10 +7,10 @@ class SystemConfig(BaseModel):
     conf_file: str
     top_file: str
     topology: str = "amber"
-    system_file: Optional[str] = None
-    project_file: Optional[str] = None
-    initial_trajectory: Optional[str] = None
-    trajectory_topology_file: Optional[str] = None
+    system_file: str | None = None
+    project_file: str | None = None
+    initial_trajectory: str | None = None
+    trajectory_topology_file: str | None = None
     feature_selection: str = "protein and not (type H)"
 
 
@@ -23,25 +23,25 @@ class EngineConfig(BaseModel):
     temperature: float = 300.0
     pressure: float = 1.0
     dt: float = 0.002
-    gpu_ids: Optional[List[int]] = None
-    gromacs_include_dir: Optional[str] = None
+    gpu_ids: list[int] | None = None
+    gromacs_include_dir: str | None = None
     gromacs_executable: str = "gmx"
-    gromacs_mdrun_nb: Optional[str] = None
-    gromacs_mdrun_pme: Optional[str] = None
-    gromacs_mdrun_update: Optional[str] = None
-    gromacs_mdrun_bonded: Optional[str] = None
-    gromacs_mdrun_pin: Optional[str] = None
+    gromacs_mdrun_nb: str | None = None
+    gromacs_mdrun_pme: str | None = None
+    gromacs_mdrun_update: str | None = None
+    gromacs_mdrun_bonded: str | None = None
+    gromacs_mdrun_pin: str | None = None
     gromacs_mdrun_ntmpi: int = 1
-    gromacs_mdrun_ntomp: Optional[int] = None
-    gromacs_mdrun_extra_args: List[str] = []
+    gromacs_mdrun_ntomp: int | None = None
+    gromacs_mdrun_extra_args: list[str] = []
     amber_executable: str = "pmemd"
-    amber_input_file: Optional[str] = None
-    amber_extra_args: List[str] = []
+    amber_input_file: str | None = None
+    amber_extra_args: list[str] = []
     amber_trajectory_format: str = "auto"
 
     @field_validator("gpu_ids")
     @classmethod
-    def validate_gpu_ids(cls, value: Optional[List[int]]) -> Optional[List[int]]:
+    def validate_gpu_ids(cls, value: list[int] | None) -> list[int] | None:
         if value is None:
             return None
         if not value:
@@ -67,12 +67,12 @@ class SpawningConfig(BaseModel):
     spawn_scheme: str = "density"
     spawn_type: str = "hard"
     search_mode: str = "explore"
-    n_bins: Optional[List[int]] = None
+    n_bins: list[int] | None = None
     walker: int = 10
     step: int = 10000
     stride: int = 100
     max_workers: int = 4
-    target: Optional[List[float]] = None
+    target: list[float] | None = None
     recent_density_window: int = 5
     voronoi_clusters: int = 150
     voronoi_periodic: bool = False
@@ -89,12 +89,12 @@ class AdaptiveModelConfig(BaseModel):
     lagtime: int = 5
     latent_dim: int = 2
     epochs: int = 50
-    batch_size: Union[int, str] = "auto"
+    batch_size: int | str = "auto"
     learning_rate: float = 0.0005
-    encoder_hidden_dims: List[int] = [256, 128]
-    decoder_hidden_dims: List[int] = [128, 256]
+    encoder_hidden_dims: list[int] = [256, 128]
+    decoder_hidden_dims: list[int] = [128, 256]
     dropout_rate: float = 0.1
-    deep_tica_hidden_dims: List[int] = [256, 128]
+    deep_tica_hidden_dims: list[int] = [256, 128]
     # SPIB (State Predictive Information Bottleneck) hyperparameters.
     spib_n_states: int = 10
     spib_beta: float = 1e-3
@@ -108,7 +108,7 @@ class AdaptiveModelConfig(BaseModel):
 
     @field_validator("batch_size")
     @classmethod
-    def validate_batch_size(cls, value: Union[int, str]) -> Union[int, str]:
+    def validate_batch_size(cls, value: int | str) -> int | str:
         if isinstance(value, str):
             if value != "auto":
                 raise ValueError("batch_size must be 'auto' or a positive integer")
@@ -133,7 +133,7 @@ class AdaptiveModelConfig(BaseModel):
 
     @field_validator("encoder_hidden_dims", "decoder_hidden_dims", "deep_tica_hidden_dims")
     @classmethod
-    def validate_hidden_dims(cls, value: List[int]) -> List[int]:
+    def validate_hidden_dims(cls, value: list[int]) -> list[int]:
         if not value:
             raise ValueError("hidden dimension lists must not be empty")
         if any(dim <= 0 for dim in value):
@@ -156,13 +156,13 @@ class MSMConfig(BaseModel):
     min_frames: int = 1000
     lagtime: int = 10
     # Optional lag-time ladder for an implied-timescale sweep (diagnostics).
-    lagtimes: Optional[List[int]] = None
+    lagtimes: list[int] | None = None
     n_microstates: int = 100
     cluster_method: str = "kmeans"  # "kmeans" | "regspace"
     estimator: str = "mle"  # "mle" | "bayesian"
     n_bayesian_samples: int = 50
     n_timescales: int = 3
-    n_metastable: Optional[int] = None
+    n_metastable: int | None = None
     # Keep microstate IDs comparable across iterations (seeds k-means from the
     # previous centres) — needed for transition-matrix convergence / spawning.
     stable_clustering: bool = False
@@ -171,7 +171,7 @@ class MSMConfig(BaseModel):
     spawn_leverage: int = 1  # slow eigenvectors used for the leverage factor
     spawn_uncertainty: bool = True  # include the outflow-uncertainty factor
     # Convergence: list of {name, params} criteria combined with all/any.
-    convergence_criteria: List[Dict[str, Any]] = Field(
+    convergence_criteria: list[dict[str, Any]] = Field(
         default_factory=lambda: [
             {"name": "implied_timescales", "params": {"tol": 0.1, "n_timescales": 2}},
             {"name": "vamp2", "params": {"tol": 0.05}},
@@ -225,12 +225,12 @@ class FeatureSelectionConfig(BaseModel):
     method: str = "greedy_vamp"  # "greedy_vamp" | "all"
     lagtime: int = 10
     cadence: int = 5  # re-select every N iterations (adaptive update)
-    max_features: Optional[int] = None  # cap on selected columns/groups
-    dim: Optional[int] = None  # singular values retained when scoring
+    max_features: int | None = None  # cap on selected columns/groups
+    dim: int | None = None  # singular values retained when scoring
     min_gain: float = 1e-4  # minimum VAMP-2 gain to add a feature group
     # Optional: rank these feature *types* by VAMP-2 and use the best one.
     # Empty -> always use the top-level `adaptive_feature_type`.
-    candidate_feature_types: List[str] = []
+    candidate_feature_types: list[str] = []
 
     @field_validator("method")
     @classmethod
@@ -241,7 +241,7 @@ class FeatureSelectionConfig(BaseModel):
 
     @field_validator("candidate_feature_types")
     @classmethod
-    def _candidate_types(cls, value: List[str]) -> List[str]:
+    def _candidate_types(cls, value: list[str]) -> list[str]:
         valid = {"distances", "fitted_coords", "phi_psi"}
         bad = [v for v in value if v not in valid]
         if bad:
@@ -269,19 +269,23 @@ class ExecutionConfig(BaseModel):
     """
 
     backend: str = "local"  # "local" | "slurm" | "pbs"
+    # Local backend: kill a walker (and abort the rest of the batch) if it runs
+    # longer than this many seconds. None disables the timeout (default). Guards
+    # against a hung in-process OpenMM walker stalling the campaign forever.
+    walker_timeout: float | None = None
     # Scheduler resource requests (per array task = one walker).
-    partition: Optional[str] = None  # SLURM partition / PBS queue
-    account: Optional[str] = None
+    partition: str | None = None  # SLURM partition / PBS queue
+    account: str | None = None
     walltime: str = "01:00:00"
     cpus_per_task: int = 1
     gpus_per_task: int = 0
-    memory: Optional[str] = None  # e.g. "8G"
+    memory: str | None = None  # e.g. "8G"
     # Robustness / polling.
     max_retries: int = 1  # resubmit failed walkers up to this many times
     poll_interval: float = 30.0  # seconds between scheduler polls
     submit_timeout: float = 60.0  # seconds for a submit/poll command
-    module_loads: List[str] = []  # `module load ...` lines for job scripts
-    extra_directives: List[str] = []  # raw #SBATCH / #PBS lines
+    module_loads: list[str] = []  # `module load ...` lines for job scripts
+    extra_directives: list[str] = []  # raw #SBATCH / #PBS lines
     job_name: str = "autosampler"
 
     @field_validator("backend")
@@ -339,9 +343,9 @@ class AutoSamplerConfig(BaseModel):
         default_factory=FeatureSelectionConfig
     )
     space_mode: str = "fixed"
-    n_bins: List[int] = [30, 30]
-    min_values: Optional[List[float]] = None
-    max_values: Optional[List[float]] = None
+    n_bins: list[int] = [30, 30]
+    min_values: list[float] | None = None
+    max_values: list[float] | None = None
     outdir: str = "runs/sampler_output"
     random_seed: int = 42
     checkpoint_freq: int = 1
@@ -352,7 +356,7 @@ class AutoSamplerConfig(BaseModel):
     retrain_policy: str = "fixed"
     vamp_retrain_tol: float = 0.1
     retrain_min_interval: int = 1
-    retrain_max_interval: Optional[int] = None
+    retrain_max_interval: int | None = None
     aggregate_memory: bool = True
     max_adaptive_memory_frames: int = 50000
     adaptive_feature_type: str = "distances"
@@ -377,7 +381,7 @@ class AutoSamplerConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def promote_spawning_n_bins(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+    def promote_spawning_n_bins(cls, values: dict[str, Any]) -> dict[str, Any]:
         values = dict(values)
         if "n_bins" not in values:
             spawning = values.get("spawning")

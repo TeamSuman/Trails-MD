@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 
 from .base import Spawner, SpawnerFactory
@@ -20,7 +18,7 @@ class LOFSpawner(Spawner):
         self,
         n_neighbors: int = 20,
         mode: str = "explore",
-        target: Optional[list] = None,
+        target: list | None = None,
         **_,
     ):
         self.n_neighbors = n_neighbors

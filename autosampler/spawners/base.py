@@ -1,20 +1,22 @@
 from abc import ABC, abstractmethod
+from typing import Any
+
 import numpy as np
-from typing import Any, Dict, List, Optional
+
 
 class Spawner(ABC):
     """Abstract Strategy interface for spawning outliers from explored space."""
-    
+
     @abstractmethod
-    def sample(self, points: np.ndarray, top_n: int, history: Optional[Dict[int, Any]] = None) -> List[int]:
+    def sample(self, points: np.ndarray, top_n: int, history: dict[int, Any] | None = None) -> list[int]:
         """Select top_n points from the set of explored points.
-        
+
         Args:
             points: numpy array of shape (n_points, n_features)
             top_n: number of points to select
             history: optional sampler history used by spawners that need
                 cumulative state.
-            
+
         Returns:
             List of indices of the selected points.
         """

@@ -1,0 +1,44 @@
+# Alanine-dipeptide hello-world: a self-contained, CPU-only, GPU-free example.
+#
+# Uses a vacuum Amber14 system built from a 22-atom structure (no external
+# force-field files, no solvent). Runs in minutes on a laptop. CV space is the
+# phi/psi dihedral pair; walkers are spawned by density over a phi/psi grid.
+#
+# Regenerate system.xml with:  python examples/alanine_dipeptide/build_system.py
+# Validate:                    autosampler --config examples/alanine_dipeptide/config.yaml --check
+# Run:                         autosampler --config examples/alanine_dipeptide/config.yaml --iterations 5
+
+system:
+  conf_file: structure.pdb
+  top_file: structure.pdb
+  topology: amber
+  system_file: system.py            # builds the OpenMM System + integrator
+  project_file: project_phi_psi.py  # defines extract_cvs (phi, psi)
+  trajectory_topology_file: structure.pdb
+  feature_selection: "protein and not (type H)"
+
+engine:
+  md_engine: openmm
+  platform_name: CPU                # laptop-friendly; no GPU required
+  temperature: 300.0
+  dt: 0.002
+  npt: false
+
+spawning:
+  spawn_scheme: density
+  spawn_type: hard
+  search_mode: explore
+  walker: 4                         # small batch
+  step: 1000                        # 2 ps per walker
+  stride: 100
+  max_workers: 2
+
+space_mode: fixed
+n_bins: [18, 18]
+min_values: [-3.141592653589793, -3.141592653589793]
+max_values: [3.141592653589793, 3.141592653589793]
+
+outdir: runs/alanine_dipeptide_hello
+random_seed: 42
+checkpoint_freq: 1
+save_features: false

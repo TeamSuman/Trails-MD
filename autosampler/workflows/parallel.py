@@ -10,7 +10,6 @@ GPU-slot scheduling behaviour.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from autosampler.execution import build_walker_tasks, make_backend
 
@@ -25,7 +24,7 @@ def run_iteration_parallel(
     outdir: Path,
     iteration: int,
     max_workers: int = 8,
-    gpu_ids: Optional[list[int]] = None,
+    gpu_ids: list[int] | None = None,
     execution=None,
 ) -> list:
     """Execute walker production runs via the configured execution backend."""

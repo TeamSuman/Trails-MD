@@ -66,7 +66,7 @@ spawning:
 # ---- CV space: fixed physical CVs or a learned latent space ----------------
 # space_mode: fixed | pca | tica | tvae | vampnet | spib | deep-tica | deep-lda
 space_mode: vampnet
-adaptive_feature_type: distances        # distances | fitted_coords | phi_psi
+adaptive_feature_type: distances        # distances | fitted_coords | phi_psi (AIB9-only)
 retrain_freq: 5                         # retrain cadence for retrain_policy: fixed
 retrain_policy: fixed                   # fixed | vamp_adaptive (retrain on VAMP-2 drop)
 # vamp_retrain_tol: 0.1                 # relative VAMP-2 drop that triggers a retrain
@@ -135,6 +135,7 @@ binning:
 # ---- Execution: where walkers run ------------------------------------------
 execution:
   backend: local                        # local | slurm | pbs
+  # walker_timeout: 3600                 # local: kill a walker after N seconds (hang guard)
   # --- scheduler settings (slurm/pbs) ---
   # partition: gpu
   # account: my_alloc

@@ -372,7 +372,7 @@ def _finite_voronoi_regions_2d(
         radius = float(np.ptp(vor.points, axis=0).max() * 2.0)
 
     all_ridges: dict[int, list[tuple[int, int, int]]] = {}
-    for (p1, p2), (v1, v2) in zip(vor.ridge_points, vor.ridge_vertices):
+    for (p1, p2), (v1, v2) in zip(vor.ridge_points, vor.ridge_vertices, strict=False):
         all_ridges.setdefault(p1, []).append((p2, v1, v2))
         all_ridges.setdefault(p2, []).append((p1, v1, v2))
 
@@ -405,7 +405,7 @@ def _finite_voronoi_regions_2d(
         vs = np.asarray([new_vertices[vertex] for vertex in new_region])
         centroid = vs.mean(axis=0)
         angles = np.arctan2(vs[:, 1] - centroid[1], vs[:, 0] - centroid[0])
-        new_region = [vertex for _, vertex in sorted(zip(angles, new_region))]
+        new_region = [vertex for _, vertex in sorted(zip(angles, new_region, strict=False))]
         new_regions.append(new_region)
 
     return new_regions, np.asarray(new_vertices, dtype=float)

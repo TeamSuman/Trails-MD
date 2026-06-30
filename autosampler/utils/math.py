@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def safe_divide(numerator: np.ndarray, denominator: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     """Perform element-wise division with epsilon handling to avoid NaN/Inf."""
     denom_safe = np.where(np.abs(denominator) > eps, denominator, eps * np.sign(denominator + 1e-12))

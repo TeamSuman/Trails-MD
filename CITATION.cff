@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use AutoSampler in your research, please cite it as below."
+title: "AutoSampler: an MSM-convergence-driven adaptive sampling framework for molecular dynamics"
+abstract: >-
+  AutoSampler is a modular framework for autonomous adaptive molecular-dynamics
+  sampling. It runs short MD walkers, projects frames into fixed or machine-learned
+  collective-variable spaces, restarts walkers from informative regions, builds a
+  Markov State Model each iteration, and stops when the MSM has converged.
+type: software
+# TODO(release): confirm the full author list, ORCIDs, and affiliations before
+# submitting the publication. The entries below are drawn from the repository and
+# must be verified.
+authors:
+  - family-names: Maity
+    given-names: Dibyendu
+    email: dibyendumaity1999@bose.res.in
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+    # affiliation: "S. N. Bose National Centre for Basic Sciences"
+  - family-names: Chakrabarty
+    given-names: Suman
+    email: chakrabarty.suman@gmail.com
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+    # affiliation: "S. N. Bose National Centre for Basic Sciences"
+version: 2.0.0
+license: MIT
+repository-code: "https://github.com/TeamSuman/AutoSampler"
+url: "https://github.com/TeamSuman/AutoSampler"
+keywords:
+  - molecular dynamics
+  - adaptive sampling
+  - Markov state model
+  - collective variables
+  - enhanced sampling
+# TODO(release): add the DOI once a Zenodo archive / preprint is minted, and add a
+# `preferred-citation:` block pointing to the journal article when published.
+# doi: "10.5281/zenodo.XXXXXXX"

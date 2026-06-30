@@ -350,3 +350,9 @@ This is an active research codebase. The examples are useful starting points,
 but production scientific claims should be made only after checking CV
 definitions, sampling bounds, lineage connectivity, and system-specific
 validation.
+
+## How to cite
+
+If you use AutoSampler in your research, please cite it. Citation metadata is in
+[`CITATION.cff`](CITATION.cff) (GitHub renders a "Cite this repository" button
+from it). A DOI and the accompanying publication will be added on release.

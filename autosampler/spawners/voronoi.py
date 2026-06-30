@@ -5,8 +5,14 @@ from typing import Any
 import numpy as np
 
 from autosampler.binning.spatial import VoronoiBinner
+
 from .base import SpawnerFactory
-from .density import DensitySpawner, _cumulative_points, _sample_frames, _weighted_choice
+from .density import (
+    DensitySpawner,
+    _cumulative_points,
+    _sample_frames,
+    _weighted_choice,
+)
 
 
 class VoronoiSpawner(DensitySpawner):

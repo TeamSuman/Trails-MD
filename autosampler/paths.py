@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-import pickle
 import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -40,7 +40,7 @@ class FrameRef:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "FrameRef":
+    def from_dict(cls, data: dict[str, Any]) -> FrameRef:
         return cls(
             iteration=int(data["iteration"]),
             walker=int(data["walker"]),
@@ -97,7 +97,7 @@ def build_frame_records(
 
     records: list[dict[str, Any]] = []
     point_offset = 0
-    for walker, (trajectory, count) in enumerate(zip(trajectories, counts)):
+    for walker, (trajectory, count) in enumerate(zip(trajectories, counts, strict=False)):
         for frame in range(count):
             parent = (
                 walker_parents[walker]
@@ -126,26 +126,29 @@ def map_global_frame(records: list[dict[str, Any]], index: int) -> dict[str, Any
 
 
 def load_history(run_dir: Path, checkpoint: int | None = None) -> dict[int, Any]:
+    from autosampler.checkpoints.manager import reconstruct_history
+
     checkpoint_root = run_dir / "checkpoints"
     if checkpoint is None:
-        checkpoint_dirs = [
-            path
+        checkpoint_iters = [
+            int(path.name.removeprefix("iter_"))
             for path in checkpoint_root.glob("iter_*")
             if path.is_dir() and path.name.removeprefix("iter_").isdigit()
         ]
-        if not checkpoint_dirs:
+        if not checkpoint_iters:
             raise FileNotFoundError(f"No checkpoints found under {checkpoint_root}")
-        checkpoint_dir = max(
-            checkpoint_dirs, key=lambda path: int(path.name.removeprefix("iter_"))
-        )
+        target = max(checkpoint_iters)
     else:
-        checkpoint_dir = checkpoint_root / f"iter_{checkpoint}"
+        target = checkpoint
+        if not (checkpoint_root / f"iter_{target}").exists():
+            raise FileNotFoundError(
+                f"History file not found: {checkpoint_root / f'iter_{target}'}"
+            )
 
-    history_path = checkpoint_dir / "history.pkl"
-    if not history_path.exists():
-        raise FileNotFoundError(f"History file not found: {history_path}")
-    with history_path.open("rb") as handle:
-        return pickle.load(handle)
+    # History is delta-checkpointed: each iter_*/history.pkl holds only the
+    # entries since the previous checkpoint. Merge them back into the full
+    # history (otherwise the lineage/path tools see only the last window).
+    return reconstruct_history(checkpoint_root, target)
 
 
 def history_records(history: dict[int, Any]) -> list[FrameRef]:

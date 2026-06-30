@@ -28,7 +28,6 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -65,15 +64,15 @@ class GromacsEngine(MDEngine):
         dt: float = 0.002,
         npt: bool = False,
         gromacs_executable: str = "gmx",
-        gromacs_include_dir: Optional[str] = None,
-        gromacs_mdrun_nb: Optional[str] = None,
-        gromacs_mdrun_pme: Optional[str] = None,
-        gromacs_mdrun_update: Optional[str] = None,
-        gromacs_mdrun_bonded: Optional[str] = None,
-        gromacs_mdrun_pin: Optional[str] = None,
+        gromacs_include_dir: str | None = None,
+        gromacs_mdrun_nb: str | None = None,
+        gromacs_mdrun_pme: str | None = None,
+        gromacs_mdrun_update: str | None = None,
+        gromacs_mdrun_bonded: str | None = None,
+        gromacs_mdrun_pin: str | None = None,
         gromacs_mdrun_ntmpi: int = 1,
-        gromacs_mdrun_ntomp: Optional[int] = None,
-        gromacs_mdrun_extra_args: Optional[list[str]] = None,
+        gromacs_mdrun_ntomp: int | None = None,
+        gromacs_mdrun_extra_args: list[str] | None = None,
         **kwargs,  # absorb OpenMM / Amber specific kwargs
     ):
         self.temperature = temperature
@@ -92,17 +91,17 @@ class GromacsEngine(MDEngine):
         self.gromacs_mdrun_extra_args = list(gromacs_mdrun_extra_args or [])
 
         # Set after prepare()
-        self.topology_file: Optional[Path] = None
-        self.start_coords_file: Optional[Path] = None
-        self.mdp_template: Optional[Path] = None
-        self.positions: Optional[str] = None  # str path for first-iteration walkers
+        self.topology_file: Path | None = None
+        self.start_coords_file: Path | None = None
+        self.mdp_template: Path | None = None
+        self.positions: str | None = None  # str path for first-iteration walkers
 
     # ------------------------------------------------------------------
     # MDEngine interface
     # ------------------------------------------------------------------
 
     def prepare(
-        self, conf: Path, top: Path, system_file: Optional[Path] = None
+        self, conf: Path, top: Path, system_file: Path | None = None
     ) -> None:
         """Validate GROMACS input files and store run-time parameters.
 
@@ -448,7 +447,7 @@ class GromacsEngine(MDEngine):
         self,
         filepath: str,
         positions_ang: np.ndarray,
-        box_ang: Optional[np.ndarray] = None,
+        box_ang: np.ndarray | None = None,
     ) -> None:
         """Write a GROMACS GRO file with updated positions.
 
@@ -518,7 +517,7 @@ class GromacsEngine(MDEngine):
         )
 
     @staticmethod
-    def _openmm_box_to_angstrom(box_vectors) -> Optional[np.ndarray]:
+    def _openmm_box_to_angstrom(box_vectors) -> np.ndarray | None:
         """Convert an OpenMM box-vectors tuple to ``[a, b, c, 90, 90, 90]`` in Angstroms.
 
         Only orthogonal boxes are currently supported.

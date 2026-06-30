@@ -35,6 +35,15 @@ class SeedManager:
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
 
+        # Request deterministic algorithm implementations where available. Some
+        # CUDA kernels need this workspace setting to be deterministic; warn_only
+        # avoids hard-failing on the rare op that lacks a deterministic variant.
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except Exception:  # noqa: BLE001 - older torch without warn_only support
+            pass
+
         # 4. PyTorch Lightning (deep-TICA / deep-LDA), if installed.
         self._seed_lightning()
 
