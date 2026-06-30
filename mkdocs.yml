@@ -22,8 +22,22 @@ nav:
   - Adaptive binning: binning.md
   - Analysis & plotting: analysis.md
   - Execution (workstation & HPC): execution.md
+  - CLI reference: cli.md
+  - API reference: api.md
+  - References: references.md
   - Tutorial — adaptive MSM: tutorials/adaptive_msm.md
   - Tutorial — notebook: notebook_tutorial.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_root_heading: true
+            show_source: false
+            members_order: source
+            docstring_style: numpy
 
 markdown_extensions:
   - admonition

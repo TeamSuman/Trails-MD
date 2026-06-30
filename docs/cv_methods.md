@@ -1,5 +1,8 @@
 # Collective variables
 
+> Primary references for TICA, VAMPNets, SPIB, deep-TICA, etc. are collected on
+> the [References](references.md) page.
+
 AutoSampler can sample in **fixed** physical CVs or **learn** CVs on the fly.
 The available learned methods live in a single registry
 (`autosampler/spaces/registry.py`), which also tracks each method's backend and

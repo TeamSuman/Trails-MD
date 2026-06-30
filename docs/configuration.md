@@ -44,7 +44,20 @@ at startup. Below, only non-obvious defaults are noted — see
 | `walker` / `step` / `stride` | `10` / `10000` / `100` | Walkers per iteration / MD steps / save interval. |
 | `max_workers` | `4` | Concurrent walkers (local backend). |
 | `voronoi_clusters` | `150` | Cells / microstates (also used by the MSM spawner). |
+| `target` | — | CV-space target `[x, y, …]` when `search_mode: target`. |
+| `recent_density_window` | `5` | Bins sampled in the last N iterations are down-weighted (`density`). |
+| `lof_neighbors` | `20` | Neighbours for the LOF spawner. |
+| `voronoi_periodic` | `false` | Wrap Voronoi cells periodically. |
+| `voronoi_grid_size` | `250` | Grid resolution for Voronoi cell-area estimation. |
+| `voronoi_max_clusters` | `5000` | Upper bound on auto-grown Voronoi cells. |
+| `resolution_check_patience` | `5` | Iterations of bin-occupancy stall before refining the grid. |
+| `resolution_max_bins` | `150` | Upper bound on per-axis bins when auto-refining. |
 | `convergence_patience` | `0` | Bin-occupancy stall patience (legacy convergence). |
+
+!!! note "Walker timeout (local backend)"
+    `execution.walker_timeout` (seconds) kills a walker that runs longer than the
+    limit and marks the batch failed — a guard against a hung in-process OpenMM
+    walker. Off by default.
 
 ## `space_mode` and adaptive model
 
