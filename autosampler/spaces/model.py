@@ -24,6 +24,7 @@ class AdaptiveSpaceModel:
         "deep_tica_hidden_dims": [256, 128],
         "spib_n_states": 10,
         "spib_beta": 1e-3,
+        "seed": 0,
     }
 
     def __init__(
@@ -40,9 +41,11 @@ class AdaptiveSpaceModel:
         deep_tica_hidden_dims: list[int] | None = None,
         spib_n_states: int = 10,
         spib_beta: float = 1e-3,
+        seed: int = 0,
         **_: Any,
     ):
         self.type = space_mode
+        self.seed = int(seed)
         self.lagtime = int(lagtime)
         self.latent_dim = int(latent_dim)
         self.epochs = int(epochs)
@@ -97,6 +100,13 @@ class AdaptiveSpaceModel:
         """
         self.ensure_config_defaults()
         input_size = features.shape[-1]
+
+        # Reseed the torch RNG from the configured seed before every fit so that a
+        # CV retrained at iteration N is reproducible regardless of the RNG draws
+        # made in between (network init, DataLoader shuffling, etc.).
+        torch.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
 
         # Fail fast with an actionable message if an optional backend is missing.
         from .registry import ensure_available, is_adaptive_space
@@ -253,6 +263,7 @@ class AdaptiveSpaceModel:
                 beta=self.spib_beta,
                 dropout=self.dropout_rate,
                 device=self.device,
+                seed=self.seed,
             )
 
         elif self.type == "deep-lda":

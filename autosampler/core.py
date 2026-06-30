@@ -206,6 +206,7 @@ class AutoSamplerCore:
     def _adaptive_model_kwargs(self) -> dict:
         kwargs = self.config.adaptive_model.model_dump()
         kwargs["space_mode"] = self.config.space_mode
+        kwargs["seed"] = self.config.random_seed  # reproducible CV training
         return kwargs
 
     def restore_checkpoint(self, iteration: int):
