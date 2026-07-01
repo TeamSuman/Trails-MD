@@ -9,20 +9,26 @@ The code is meant for method development and practical sampling workflows where
 you need to change engines, CVs, spawning policies, or analysis criteria without
 rewriting the whole pipeline.
 
-## What's new
+## Key features
 
-- **Landscape-adaptive binning** — place bins finer across barriers and coarser
-  in basins, recomputed each
-  iteration; defaults to the uniform grid.
-- **More learned CVs** — TICA / TVAE / PCA / deep-TICA.
+- **Engine-agnostic walkers** — OpenMM, GROMACS, and Amber share the same
+  adaptive loop.
+- **Fixed or learned sampling spaces** — user-defined physical CVs, PCA, TICA,
+  TVAE, and Deep-TICA, swappable at configuration time.
+- **Interchangeable spawning policies** — density, Voronoi, local-outlier-factor,
+  and farthest-point selection.
+- **Lineage-aware exploration** — every spawned frame stores its parent–child
+  ancestry, so connected transition pathways can be reconstructed from otherwise
+  disjoint exploration stages.
+- **Restartable campaigns** — per-iteration checkpoints capture the adaptive
+  model, feature history, sampling state, and walker coordinates.
 - **HPC scalability** — run on a multi-GPU workstation or dispatch walkers as
   **SLURM** / **PBS** array jobs (`execution.backend`).
 
-Get started in one command — `trails-md-init` writes an annotated input file
-covering every method, feature, and hyperparameter (see
-[`docs/input_file.md`](docs/input_file.md)). A runnable
-[notebook tutorial](examples/notebooks/adaptive_msm_tutorial.ipynb) with rendered
-plots walks through the whole workflow.
+A runnable [notebook tutorial](examples/notebooks/adaptive_msm_tutorial.ipynb)
+with rendered plots walks through the whole workflow, and an annotated input
+file covering the available methods and hyperparameters is documented in
+[`docs/input_file.md`](docs/input_file.md).
 
 See **[`docs/`](docs/index.md)** (full documentation & tutorials) and
 **[`CHANGELOG.md`](CHANGELOG.md)**. Build the docs site with
@@ -234,31 +240,28 @@ The sampling space is chosen with `space_mode`. Beyond fixed user CVs, several
 learned CV methods are available through a single registry
 (`trails_md/spaces/registry.py`), so new methods can be added in one place:
 
-| `space_mode`                 | Method                                  | Backend             | Notes                                |
-| ---------------------------- | --------------------------------------- | ------------------- | ------------------------------------ |
-| `fixed`                      | User CVs via a project file             | —                   | e.g. AlaD `phi/psi`                  |
-| `pca`                        | Principal component analysis            | scikit-learn        | linear baseline                      |
-| `tica`                       | Time-lagged ICA                         | deeptime            | linear, dynamics-aware               |
-| `tvae`                       | Time-lagged VAE                         | deeptime + torch    | nonlinear bottleneck                 |
-| `vampnet`(\*\*experimental)  | VAMPNet                                 | deeptime + torch    | trained with the VAMP-2 score        |
-| `spib`(\*\*experimental)     | State Predictive Information Bottleneck | built-in (torch)    | Wang & Tiwary 2021                   |
-| `deep-tica`                  | Deep (nonlinear) TICA                   | mlcolvar (optional) | `pip install "trails-md[deep-tica]"` |
-| `deep-lda`(\*\*experimental) | Deep LDA (supervised)                   | mlcolvar (optional) | needs state labels                   |
+| `space_mode` | Method                       | Backend             | Notes                                |
+| ------------ | ---------------------------- | ------------------- | ------------------------------------ |
+| `fixed`      | User CVs via a project file  | —                   | e.g. AlaD `phi/psi`                  |
+| `pca`        | Principal component analysis | scikit-learn        | linear baseline                      |
+| `tica`       | Time-lagged ICA              | deeptime            | linear, dynamics-aware               |
+| `tvae`       | Time-lagged VAE              | deeptime + torch    | nonlinear bottleneck                 |
+| `deep-tica`  | Deep (nonlinear) TICA        | mlcolvar (optional) | `pip install "trails-md[deep-tica]"` |
 
-`vampnet` and `spib` work out of the box (only deeptime/torch). Optional methods
-raise a clear, actionable error if their backend is missing.
+When a model is retrained, the full feature history is reprojected into the
+updated latent space before spawning, so selection always reflects the current
+coordinates. Optional methods raise a clear, actionable error if their backend
+is missing.
 
-## MSM-Based Convergence (\*\*experimental)
+## Post-Processing and Kinetic Seeding
 
-With `msm.enabled: true`, Trails-MD builds a Markov State Model over the CV
-space each iteration (clustering → transition counts → MLE/Bayesian MSM →
-implied timescales, VAMP-2 score, PCCA+ metastable states) and stops sampling
-once the MSM has **converged**. Convergence is decided by a composable
-`ConvergenceMonitor` with pluggable criteria — implied-timescale stability,
-VAMP-2 plateau, stationary-distribution drift, and Bayesian statistical error —
-combined with `all`/`any` and a patience window. Per-iteration results are
-written to `iter_*/msm.npz`. See `examples/AIB9/config_msm_vampnet.yaml` for a
-complete MSM-driven adaptive-sampling configuration.
+Trails-MD separates adaptive exploration from kinetic estimation. Walkers are
+short and their velocities are redrawn from a Maxwell–Boltzmann distribution at
+each spawn point, so the adaptive trajectories are intended for exploration
+rather than as an unbiased kinetic ensemble. After a campaign, the explored
+space can be discretized and representative structures selected to seed longer,
+unbiased production trajectories. Those production runs are the appropriate
+input for Markov State Model (MSM) construction and related kinetic analyses.
 
 ## Typical Workflow
 
