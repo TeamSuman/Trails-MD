@@ -9,9 +9,9 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-import autosampler.spawners.msm  # noqa: E402,F401  (ensures registration)
-from autosampler.config import AutoSamplerConfig, MSMConfig  # noqa: E402
-from autosampler.spawners import SpawnerFactory  # noqa: E402
+import trails_md.spawners.msm  # noqa: E402,F401  (ensures registration)
+from trails_md.config import MSMConfig, TrailsMDConfig  # noqa: E402
+from trails_md.spawners import SpawnerFactory  # noqa: E402
 
 
 def _base_config(**overrides):
@@ -25,7 +25,7 @@ def _base_config(**overrides):
 
 
 def test_msm_disabled_by_default():
-    cfg = AutoSamplerConfig(**_base_config())
+    cfg = TrailsMDConfig(**_base_config())
     assert cfg.msm.enabled is False
     # Default convergence criteria present so enabling needs no extra config.
     names = {c["name"] for c in cfg.msm.convergence_criteria}

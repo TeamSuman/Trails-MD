@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Plot AIB9 exploration in RMSD/Rg space from AutoSampler XTC outputs."""
+"""Plot AIB9 exploration in RMSD/Rg space from Trails-MD XTC outputs."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def _trajectory_sort_key(path: Path) -> tuple[int, int, str]:
 def find_trajectories(outdir: Path) -> list[Path]:
     trajectories = sorted(outdir.glob("iter_*/iteration_*_*.xtc"), key=_trajectory_sort_key)
     if not trajectories:
-        raise FileNotFoundError(f"No AutoSampler XTC files found under {outdir}")
+        raise FileNotFoundError(f"No Trails-MD XTC files found under {outdir}")
     return trajectories
 
 
@@ -117,7 +117,7 @@ def plot_rmsd_rg(
     ax.set_ylabel("AIB heavy-atom radius of gyration (A)")
     ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.45)
     cbar = fig.colorbar(scatter, ax=ax)
-    cbar.set_label("AutoSampler iteration")
+    cbar.set_label("Trails-MD iteration")
     fig.tight_layout()
     fig.savefig(output_png, dpi=300, bbox_inches="tight")
     plt.close(fig)

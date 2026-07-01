@@ -1,4 +1,4 @@
-"""Generate a structured PDF of the AutoSampler production-readiness review."""
+"""Generate a structured PDF of the Trails-MD production-readiness review."""
 
 import os
 
@@ -21,7 +21,7 @@ from reportlab.platypus import (
 
 OUT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "AutoSampler_Review.pdf",
+    "Trails-MD_Review.pdf",
 )
 
 NAVY = colors.HexColor("#1A237E")
@@ -82,7 +82,7 @@ def sev_table(rows, col_widths, header_bg=NAVY):
 
 # ---------------- Title page ----------------
 story.append(Spacer(1, 36))
-story.append(Paragraph("AutoSampler", TITLE))
+story.append(Paragraph("Trails-MD", TITLE))
 story.append(Paragraph("Production &amp; Publication Readiness Review", SUB))
 rule()
 story.append(Paragraph(
@@ -143,7 +143,7 @@ story.append(bullets([
     "<b>retraining policies</b> are cleanly factored and tested.",
     "<b>Execution backends</b> (local / SLURM / PBS) behind a clean strategy "
     "interface; scheduler logic is unit-tested with a fake command runner.",
-    "<b>Developer experience</b>: annotated input-file template + autosampler-init, a "
+    "<b>Developer experience</b>: annotated input-file template + trails-md-init, a "
     "full MkDocs site, and a rendered Jupyter notebook tutorial that runs on synthetic "
     "data without a GPU.",
     "Test quality where present is high — assertions check real numerical/behavioural "
@@ -155,7 +155,7 @@ story.append(Paragraph("2. Fixed during this review", H1))
 rule()
 story.append(Paragraph(
     "The following were implemented and pushed to branch "
-    "<font face='Courier'>claude/autosampler-analysis-plan-jj0n1q</font> (suite green "
+    "<font face='Courier'>claude/trails-md-analysis-plan-jj0n1q</font> (suite green "
     "at 101 tests). They are recorded here so the report doubles as a change log.", BODY))
 sev_table([
     ["#", "Item", "Resolution"],
@@ -163,7 +163,7 @@ sev_table([
      "Regenerated from the single source; suite green."],
     ["2", "Documented conda install broken (env.yml pinned pydantic 1.x; missing "
      "shapely)", "Bumped to pydantic&gt;=2.0, added shapely + deep-CV backends."],
-    ["3", "Delta-checkpoint resume truncated history (broke autosampler-path); "
+    ["3", "Delta-checkpoint resume truncated history (broke trails-md-path); "
      "non-atomic writes", "Reconstruct full history across deltas; atomic writes; "
      "tolerate a corrupt delta; added regression tests."],
     ["4", "Local backend aborted the whole iteration if one walker failed",
@@ -192,7 +192,7 @@ sev_table([
     ["Broken documented install",
      "env.yml pydantic 1.x vs Pydantic-v2 code; missing shapely. <b>FIXED.</b>"],
     ["Delta-checkpoint regression",
-     "autosampler-path read a truncated (delta-only) history; non-atomic writes. "
+     "trails-md-path read a truncated (delta-only) history; non-atomic writes. "
      "<b>FIXED.</b>"],
     ["Quick Start cannot run",
      "AlaD needs an external GROMACS force field; no CPU-only hello-world exists. "
@@ -271,7 +271,7 @@ story.append(bullets([
     "Config schema uses the Pydantic default (extra=ignore): a typo'd key passes "
     "<font face='Courier'>--check</font> silently — consider extra=forbid (and fix the "
     "example configs that rely on it).",
-    "configuration.md omits several real keys; CLI reference omits autosampler-init / "
+    "configuration.md omits several real keys; CLI reference omits trails-md-init / "
     "-analyze; no API reference (mkdocstrings); method citations are thin "
     "(TICA/VAMPNet/PCCA+/MAB uncited).",
     "No worked example for spib, deep-tica, lof, fps, we, target mode, pbs, or "
@@ -337,7 +337,7 @@ def footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(DGREY)
-    canvas.drawString(20 * mm, 12 * mm, "AutoSampler — Production & Publication Readiness Review")
+    canvas.drawString(20 * mm, 12 * mm, "Trails-MD — Production & Publication Readiness Review")
     canvas.drawRightString(190 * mm, 12 * mm, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -345,8 +345,8 @@ def footer(canvas, doc):
 doc = SimpleDocTemplate(
     OUT, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
     topMargin=16 * mm, bottomMargin=18 * mm,
-    title="AutoSampler Production & Publication Readiness Review",
-    author="AutoSampler review",
+    title="Trails-MD Production & Publication Readiness Review",
+    author="Trails-MD review",
 )
 doc.build(story, onFirstPage=footer, onLaterPages=footer)
 print("WROTE", OUT)

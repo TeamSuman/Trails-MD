@@ -1,4 +1,4 @@
-# Pre-commit hooks for AutoSampler. Install with:
+# Pre-commit hooks for Trails-MD. Install with:
 #   pip install pre-commit && pre-commit install
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit

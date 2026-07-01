@@ -89,7 +89,7 @@ execution:
   poll_interval: 30
   module_loads:
     - "module load cuda/12.2"
-    # - "source $(conda info --base)/etc/profile.d/conda.sh && conda activate autosampler"
+    # - "source $(conda info --base)/etc/profile.d/conda.sh && conda activate trails-md"
 
 outdir: runs/adaptive_msm_feature_selection
 random_seed: 7

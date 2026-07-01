@@ -7,7 +7,7 @@ import pytest
 
 deeptime = pytest.importorskip("deeptime")
 
-from autosampler.msm import (  # noqa: E402
+from trails_md.msm import (  # noqa: E402
     ConvergenceMonitor,
     ImpliedTimescaleCriterion,
     MSMEstimator,

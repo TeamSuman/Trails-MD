@@ -16,16 +16,16 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-import autosampler.execution.run_task as run_task  # noqa: E402
-from autosampler.engines.base import EngineFactory  # noqa: E402
-from autosampler.execution import (  # noqa: E402
+import trails_md.execution.run_task as run_task  # noqa: E402
+from trails_md.engines.base import EngineFactory  # noqa: E402
+from trails_md.execution import (  # noqa: E402
     ExecutionBackendFactory,
     build_walker_tasks,
     make_backend,
 )
-from autosampler.execution import local as local_mod  # noqa: E402
-from autosampler.execution.pbs import PBSBackend  # noqa: E402
-from autosampler.execution.slurm import SlurmBackend  # noqa: E402
+from trails_md.execution import local as local_mod  # noqa: E402
+from trails_md.execution.pbs import PBSBackend  # noqa: E402
+from trails_md.execution.slurm import SlurmBackend  # noqa: E402
 
 
 # ── fake engine: directive carried via start_coords ─────────────────────────
@@ -212,7 +212,7 @@ def test_slurm_script_directives(tmp_path):
     assert "#SBATCH --gpus-per-task=1" in script
     assert "#SBATCH --time=02:00:00" in script
     assert "SLURM_ARRAY_TASK_ID" in script
-    assert "autosampler.execution.run_task" in script
+    assert "trails_md.execution.run_task" in script
 
 
 def test_pbs_script_directives(tmp_path):
@@ -236,7 +236,7 @@ def test_pbs_parse_job_id():
 
 # ── make_backend dispatch ───────────────────────────────────────────────────
 def test_make_backend_dispatch():
-    from autosampler.config import ExecutionConfig
+    from trails_md.config import ExecutionConfig
 
     assert make_backend(None).__class__.__name__ == "LocalProcessBackend"
     assert (

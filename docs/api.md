@@ -5,24 +5,24 @@ referee is most likely to call directly; the full package has more.
 
 ## Configuration
 
-::: autosampler.config.AutoSamplerConfig
+::: trails_md.config.TrailsMDConfig
 
 ## MSM estimation & convergence
 
-::: autosampler.msm.estimator
+::: trails_md.msm.estimator
 
-::: autosampler.msm.convergence
+::: trails_md.msm.convergence
 
 ## Collective-variable feature selection
 
-::: autosampler.spaces.feature_selection
+::: trails_md.spaces.feature_selection
 
 ## Adaptive binning
 
-::: autosampler.binning.adaptive
+::: trails_md.binning.adaptive
 
 ## Analysis & plotting
 
-::: autosampler.analysis.data
+::: trails_md.analysis.data
 
-::: autosampler.analysis.plots
+::: trails_md.analysis.plots

@@ -9,14 +9,14 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-from autosampler.binning.adaptive import (  # noqa: E402
+from trails_md.binning.adaptive import (  # noqa: E402
     EigenvectorBinner,
     GradientBinner,
     MABinner,
     make_binner,
 )
-from autosampler.binning.spatial import RegularBinner  # noqa: E402
-from autosampler.spawners import SpawnerFactory  # noqa: E402
+from trails_md.binning.spatial import RegularBinner  # noqa: E402
+from trails_md.spawners import SpawnerFactory  # noqa: E402
 
 
 def _double_well(n=4000, seed=0):
@@ -75,7 +75,7 @@ def test_mab_produces_front_footholds():
 def test_binning_config_validation():
     from pydantic import ValidationError
 
-    from autosampler.config import BinningConfig
+    from trails_md.config import BinningConfig
 
     assert BinningConfig(scheme="gradient").scheme == "gradient"
     with pytest.raises(ValidationError):

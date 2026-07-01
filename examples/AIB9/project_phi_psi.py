@@ -1,7 +1,7 @@
-"""AIB9 phi/psi projector for fixed-space AutoSampler runs.
+"""AIB9 phi/psi projector for fixed-space Trails-MD runs.
 
 The paper tracks 18 dihedrals ordered as phi1, psi1, ..., phi9, psi9 and
-illustrates the free-energy surface using residue 5.  AutoSampler's fixed density
+illustrates the free-energy surface using residue 5.  Trails-MD's fixed density
 spawner is most practical in 2D, so extract_cvs returns the residue-5 phi/psi
 pair by default.  Use extract_all_phi_psi() when the full 18D paper coordinate
 set is needed for analysis.

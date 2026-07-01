@@ -31,7 +31,7 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Lint (ruff, whole tree)
-        run: ruff check autosampler tests
+        run: ruff check trails_md tests
 
       - name: Run test suite
         run: pytest -q

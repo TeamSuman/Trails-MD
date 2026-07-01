@@ -1,11 +1,11 @@
-# AutoSampler examples
+# Trails-MD examples
 
 Each example is a self-contained config plus the assets it needs. Paths inside a
 config are resolved relative to that config file. Validate any example without
 running MD using `--check`:
 
 ```bash
-autosampler --config examples/<path>/config.yaml --check
+trails-md --config examples/<path>/config.yaml --check
 ```
 
 ## Start here (laptop-friendly, no GPU)
@@ -20,7 +20,7 @@ The alanine-dipeptide system (`system.xml`) is built from the bundled 22-atom
 first run:
 
 ```bash
-autosampler --config examples/alanine_dipeptide/config.yaml --iterations 5
+trails-md --config examples/alanine_dipeptide/config.yaml --iterations 5
 ```
 
 ## AIB9 peptide (uses the bundled `aib9_system.xml`)

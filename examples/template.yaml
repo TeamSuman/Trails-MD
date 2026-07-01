@@ -1,10 +1,10 @@
 # ============================================================================
-# AutoSampler input file
+# Trails-MD input file
 #
 # A single YAML file fully describes a run: the system, MD engine, how walkers
 # are spawned, the collective-variable (CV) space, optional feature selection
 # and MSM-convergence, and where jobs execute. Paths are resolved relative to
-# this file. Validate before running:  autosampler --config config.yaml --check
+# this file. Validate before running:  trails-md --config config.yaml --check
 # Full reference: docs/input_file.md and docs/configuration.md
 # ============================================================================
 

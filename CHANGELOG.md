@@ -1,12 +1,12 @@
 # Changelog
 
-All notable changes to AutoSampler are documented here. The format is based on
+All notable changes to Trails-MD are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — `devel`
 
-This cycle turns AutoSampler from a coverage-driven adaptive sampler into an
+This cycle turns Trails-MD from a coverage-driven adaptive sampler into an
 **MSM-convergence-driven** framework, hardens the engineering foundation, and
 adds first-class **HPC scalability** and **VAMP-2 feature optimisation**. It also
 adds a flux-weighted **transition-matrix convergence** gate with
@@ -15,7 +15,7 @@ adds a flux-weighted **transition-matrix convergence** gate with
 ### Added
 
 #### MSM convergence engine (Phase 1)
-- New `autosampler/msm/` subsystem built on `deeptime`:
+- New `trails_md/msm/` subsystem built on `deeptime`:
   - `MSMEstimator` — clustering (k-means / regular-space) on the CV/latent
     space → transition counts → MLE **or** Bayesian MSM → implied timescales,
     VAMP-2 score, PCCA+ metastable states, stationary distribution.
@@ -41,22 +41,22 @@ adds a flux-weighted **transition-matrix convergence** gate with
   for resume.
 
 #### MSM analysis & plotting
-- `autosampler/analysis/` — matplotlib-free data utilities (`load_msm_series`,
+- `trails_md/analysis/` — matplotlib-free data utilities (`load_msm_series`,
   `load_latest_msm`, `load_cv_points`, free energies, free-energy surface) plus
   `plots` (implied timescales, VAMP-2 / timescale convergence, free-energy
   surface, metastable free energies, MSM network) and a one-command
-  `autosampler-analyze` CLI producing a multi-panel convergence report.
+  `trails-md-analyze` CLI producing a multi-panel convergence report.
 - `msm.npz` now also stores the implied-timescale sweep and metastable
   populations for plotting.
 
 #### Extensible ML collective variables (Phase 1)
-- `autosampler/spaces/registry.py` — single source of truth for CV methods,
+- `trails_md/spaces/registry.py` — single source of truth for CV methods,
   their backends, and availability. Adds **VAMPNet** and **SPIB** (State
   Predictive Information Bottleneck) alongside TICA, TVAE, PCA, deep-TICA, and
   deep-LDA, with actionable errors when an optional backend is missing.
 
 #### HPC execution backends (Phase 3)
-- `autosampler/execution/` — pluggable `ExecutionBackend` (factory pattern):
+- `trails_md/execution/` — pluggable `ExecutionBackend` (factory pattern):
   - `local` — multiprocessing across CPU/GPU slots on one node (multi-GPU
     workstation); preserves the original GPU-slot scheduling.
   - `slurm` / `pbs` — one **array job per iteration**, with completion driven by
@@ -67,14 +67,14 @@ adds a flux-weighted **transition-matrix convergence** gate with
   directives). Defaults to `local`.
 
 #### VAMP-2 input-feature selection
-- `autosampler/spaces/feature_selection.py` — `vamp2_score`, `rank_candidates`,
+- `trails_md/spaces/feature_selection.py` — `vamp2_score`, `rank_candidates`,
   `greedy_vamp_selection`, and `FeatureSelector`: choose and **adaptively
   update** the input features that best resolve the slow dynamics.
 - `FeatureSelectionConfig` (`feature_selection.enabled`, opt-in) — re-selects
   feature columns every `cadence` iterations; selection persisted for resume.
 
 #### Landscape-adaptive binning
-- `autosampler/binning/adaptive.py` — `AdaptiveBinner` + `BinnerFactory` with
+- `trails_md/binning/adaptive.py` — `AdaptiveBinner` + `BinnerFactory` with
   `gradient` (equi-resistance: fine bins where the density is low / barriers),
   `mab` (Minimal-Adaptive-Binning style front footholds), and `eigenvector` (bin
   along the leading slow CV coordinate) schemes alongside `uniform`. Selected via
@@ -94,8 +94,8 @@ adds a flux-weighted **transition-matrix convergence** gate with
   switches the loop to the best one (re-running column selection on a change).
 
 #### End-user input file & tutorial
-- **`autosampler-init`** writes a fully-annotated starter input file
-  (`autosampler/templates.py`, mirrored to `examples/template.yaml`) covering
+- **`trails-md-init`** writes a fully-annotated starter input file
+  (`trails_md/templates.py`, mirrored to `examples/template.yaml`) covering
   every section, method choice, and hyperparameter. Documented in
   `docs/input_file.md`.
 - **Jupyter notebook tutorial** with rendered plots
@@ -113,13 +113,13 @@ adds a flux-weighted **transition-matrix convergence** gate with
 
 ### Changed (Phase 2 — engineering foundation)
 - Refactored the per-iteration UI out of `core.py` into
-  `autosampler/reporting.py` (`IterationReporter`); de-duplicated project-file
+  `trails_md/reporting.py` (`IterationReporter`); de-duplicated project-file
   CV loading.
 - Migrated configuration to **Pydantic v2** (`field_validator` /
   `model_validator`, `model_dump()`); pinned `pydantic>=2.0`.
 - Added **checkpoint format versioning** and generalised torch-encoder
   snapshots to tvae / vampnet / spib.
-- Made `autosampler.spaces` import lazily so lightweight modules (e.g. the CV
+- Made `trails_md.spaces` import lazily so lightweight modules (e.g. the CV
   registry) import without MDAnalysis / torch.
 
 ### Production-readiness hardening (pre-release pass)
@@ -129,7 +129,7 @@ adds a flux-weighted **transition-matrix convergence** gate with
 - **Robustness:** the local backend tolerates a single walker's failure (and adds
   an opt-in `execution.walker_timeout` hang guard) instead of aborting the batch;
   delta-checkpoint resume reconstructs the full history (fixing a truncated
-  `autosampler-path`), writes atomically, and tolerates a corrupt delta; fixed a
+  `trails-md-path`), writes atomically, and tolerates a corrupt delta; fixed a
   target-mode spawn crash and a deep-TICA device mismatch.
 - **Packaging:** OpenMM is now an optional, lazily-imported backend so the base
   `pip install` resolves; full PyPI metadata + single-sourced version;
@@ -145,7 +145,7 @@ adds a flux-weighted **transition-matrix convergence** gate with
 ### Fixed (Phase 2)
 - Renamed `AdaptiveSpaceModel.fited` → `fitted` (with a backwards-compatible
   loader for old checkpoints).
-- Added MD subprocess timeouts (`AUTOSAMPLER_MD_TIMEOUT`) for GROMACS / Amber.
+- Added MD subprocess timeouts (`TRAILS_MD_TIMEOUT`) for GROMACS / Amber.
 - Validate trajectory files exist and are non-empty before CV extraction.
 - Replaced hardcoded `/tmp` with `tempfile.gettempdir()`; narrowed an
   over-broad exception handler.

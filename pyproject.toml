@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "autosampler"
+name = "trails-md"
 dynamic = ["version"]
 description = "Adaptive collective-variable sampling framework for molecular dynamics."
 readme = "README.md"
@@ -44,16 +44,16 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/TeamSuman/AutoSampler"
-Repository = "https://github.com/TeamSuman/AutoSampler"
-Documentation = "https://github.com/TeamSuman/AutoSampler/tree/main/docs"
-Issues = "https://github.com/TeamSuman/AutoSampler/issues"
-Changelog = "https://github.com/TeamSuman/AutoSampler/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/TeamSuman/Trails-MD"
+Repository = "https://github.com/TeamSuman/Trails-MD"
+Documentation = "https://github.com/TeamSuman/Trails-MD/tree/main/docs"
+Issues = "https://github.com/TeamSuman/Trails-MD/issues"
+Changelog = "https://github.com/TeamSuman/Trails-MD/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # The default OpenMM engine. Kept optional because OpenMM is most reliably
 # installed from conda-forge; the engine is imported lazily so the base package
-# installs and imports without it. `pip install 'autosampler[openmm]'` pulls the
+# installs and imports without it. `pip install 'trails-md[openmm]'` pulls the
 # PyPI wheel where available.
 openmm = [
   "openmm>=8.0",
@@ -73,27 +73,27 @@ docs = [
   "mkdocs-material>=9.0",
 ]
 all = [
-  "autosampler[openmm,deep-tica,examples,test,docs]",
+  "trails-md[openmm,deep-tica,examples,test,docs]",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["autosampler*"]
+include = ["trails_md*"]
 exclude = ["examples*", "tests*", "latex*"]
 
 [tool.setuptools]
 include-package-data = false
 
 [tool.setuptools.dynamic]
-version = { attr = "autosampler.__version__" }  # single source: autosampler/__init__.py
+version = { attr = "trails_md.__version__" }  # single source: trails_md/__init__.py
 
 [project.scripts]
-autosampler = "autosampler.cli:main"
-autosampler-run = "autosampler.cli:main"
-autosampler-path = "autosampler.path_cli:main"
-autosampler-log = "autosampler.log_cli:main"
-autosampler-analyze = "autosampler.analysis_cli:main"
-autosampler-init = "autosampler.init_cli:main"
+trails-md = "trails_md.cli:main"
+trails-md-run = "trails_md.cli:main"
+trails-md-path = "trails_md.path_cli:main"
+trails-md-log = "trails_md.log_cli:main"
+trails-md-analyze = "trails_md.analysis_cli:main"
+trails-md-init = "trails_md.init_cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -122,5 +122,5 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # re-exports
 "tests/*" = ["E402"]  # importorskip before imports
-"autosampler/core.py" = ["E402"]  # warnings.filterwarnings must precede imports
-"autosampler/engines/openmm.py" = ["F403", "F405"]  # `from openmm import *` API
+"trails_md/core.py" = ["E402"]  # warnings.filterwarnings must precede imports
+"trails_md/engines/openmm.py" = ["F403", "F405"]  # `from openmm import *` API

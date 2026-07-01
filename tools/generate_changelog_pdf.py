@@ -1,4 +1,4 @@
-"""Generate a structured PDF changelog for AutoSampler."""
+"""Generate a structured PDF changelog for Trails-MD."""
 import os
 
 from reportlab.lib import colors
@@ -18,7 +18,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "AutoSampler_Changelog.pdf")
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Trails-MD_Changelog.pdf")
 
 NAVY = colors.HexColor("#1A237E")
 INDIGO = colors.HexColor("#3949AB")
@@ -60,7 +60,7 @@ def rule():
 
 # ---------------- Title page ----------------
 story.append(Spacer(1, 40))
-story.append(Paragraph("AutoSampler", TITLE))
+story.append(Paragraph("Trails-MD", TITLE))
 story.append(Paragraph("Development Changelog &amp; Feature Summary", SUB))
 rule()
 story.append(Paragraph(
@@ -108,7 +108,7 @@ rule()
 story.append(Paragraph("Markov State Model (MSM) convergence engine", H2))
 story.append(Paragraph(
     "The central gap in v2.0.0 — there was no MSM at all, and \"convergence\" "
-    "meant bin-occupancy saturation. The new <b>autosampler/msm/</b> subsystem "
+    "meant bin-occupancy saturation. The new <b>trails_md/msm/</b> subsystem "
     "(built on deeptime) builds an MSM every iteration and stops sampling when it "
     "is genuinely converged.", BODY))
 story.append(bullets([
@@ -147,7 +147,7 @@ story.append(Paragraph(
     "The density / weighted-ensemble spawners stratify the CV space into bins. A "
     "uniform grid wastes replicas in flat basins and, worse, lets walkers slide "
     "back across a wide bin at a barrier before the lag time elapses — stalling "
-    "the flux. The new <b>autosampler/binning/adaptive.py</b> makes bins "
+    "the flux. The new <b>trails_md/binning/adaptive.py</b> makes bins "
     "landscape-adaptive, recomputed every iteration (selected by "
     "<font face='Courier'>binning.scheme</font>; opt-in, default "
     "<font face='Courier'>uniform</font>).", BODY))
@@ -179,8 +179,8 @@ story.append(bullets([
     "non-functional placeholder.",
     "<b>MSM analysis &amp; plotting</b>: implied timescales, VAMP-2 / timescale "
     "convergence, free-energy surfaces, metastable free energies, and MSM network "
-    "diagrams, via the <font face='Courier'>autosampler-analyze</font> CLI.",
-    "<b>One input file for everything</b>: <font face='Courier'>autosampler-init</font> "
+    "diagrams, via the <font face='Courier'>trails-md-analyze</font> CLI.",
+    "<b>One input file for everything</b>: <font face='Courier'>trails-md-init</font> "
     "writes a fully-annotated YAML exposing every method, feature, and "
     "hyperparameter; documented for end users.",
     "Full documentation site, an executed Jupyter notebook tutorial with rendered "
@@ -229,9 +229,9 @@ sections = [
         "and contribution guidelines.",
     ]),
     ("Analysis &amp; usability", [
-        "autosampler-analyze: one-command multi-panel convergence report.",
+        "trails-md-analyze: one-command multi-panel convergence report.",
         "Matplotlib-free analysis data utilities plus plotting helpers.",
-        "autosampler-init starter input file; full MkDocs documentation; "
+        "trails-md-init starter input file; full MkDocs documentation; "
         "rendered Jupyter notebook tutorial; local/SLURM/PBS example scripts.",
     ]),
 ]
@@ -263,9 +263,9 @@ rows = [
     ["Weighted ensemble", "Placeholder stub (no-op)",
      "Correct, weight-conserving split/merge"],
     ["Analysis/plots", "None bundled",
-     "autosampler-analyze: ITS, VAMP-2, FES, network"],
+     "trails-md-analyze: ITS, VAMP-2, FES, network"],
     ["Input file", "YAML (sparse examples)",
-     "autosampler-init annotated template + docs"],
+     "trails-md-init annotated template + docs"],
     ["Tests / CI", "None", "96 tests, CI (3.10 &amp; 3.11), ruff"],
     ["Docs / tutorials", "README only",
      "MkDocs site, notebook tutorial, changelog PDF"],
@@ -350,7 +350,7 @@ for line in [
     story.append(Paragraph(line, code))
 story.append(Spacer(1, 8))
 story.append(Paragraph(
-    "Generated for the AutoSampler devel branch. See CHANGELOG.md and the "
+    "Generated for the Trails-MD devel branch. See CHANGELOG.md and the "
     "documentation for full details.", SMALL))
 
 
@@ -358,7 +358,7 @@ def footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(DGREY)
-    canvas.drawString(20*mm, 12*mm, "AutoSampler — Development Changelog")
+    canvas.drawString(20*mm, 12*mm, "Trails-MD — Development Changelog")
     canvas.drawRightString(190*mm, 12*mm, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -366,8 +366,8 @@ def footer(canvas, doc):
 doc = SimpleDocTemplate(
     OUT, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm,
     topMargin=18*mm, bottomMargin=18*mm,
-    title="AutoSampler Development Changelog",
-    author="AutoSampler",
+    title="Trails-MD Development Changelog",
+    author="Trails-MD",
 )
 doc.build(story, onFirstPage=footer, onLaterPages=footer)
 print("WROTE", OUT)

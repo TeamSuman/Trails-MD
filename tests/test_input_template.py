@@ -1,4 +1,4 @@
-"""Tests for the input-file template and the autosampler-init CLI."""
+"""Tests for the input-file template and the trails-md-init CLI."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ import yaml
 
 warnings.filterwarnings("ignore")
 
-from autosampler.config import AutoSamplerConfig  # noqa: E402
-from autosampler.templates import DEFAULT_TEMPLATE  # noqa: E402
+from trails_md.config import TrailsMDConfig  # noqa: E402
+from trails_md.templates import DEFAULT_TEMPLATE  # noqa: E402
 
 
 def test_template_parses_into_config():
-    cfg = AutoSamplerConfig(**yaml.safe_load(DEFAULT_TEMPLATE))
+    cfg = TrailsMDConfig(**yaml.safe_load(DEFAULT_TEMPLATE))
     # Spot-check a value from each major block.
     assert cfg.system.conf_file
     assert cfg.engine.md_engine in {"openmm", "gromacs", "amber"}
@@ -34,12 +34,12 @@ def test_example_template_matches_module():
 
 
 def test_init_cli_writes_and_guards(tmp_path):
-    from autosampler.init_cli import main
+    from trails_md.init_cli import main
 
     out = tmp_path / "config.yaml"
     main(["-o", str(out)])
     assert out.exists()
-    assert AutoSamplerConfig(**yaml.safe_load(out.read_text())) is not None
+    assert TrailsMDConfig(**yaml.safe_load(out.read_text())) is not None
 
     # Refuses to overwrite without --force, succeeds with it.
     with pytest.raises(SystemExit):

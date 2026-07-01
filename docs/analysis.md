@@ -2,13 +2,13 @@
 
 When `msm.enabled` is set, each iteration writes an `iter_*/msm.npz` with the
 MSM diagnostics (timescales, VAMP-2, stationary distribution, transition matrix,
-metastable populations, and the implied-timescale sweep). AutoSampler ships
+metastable populations, and the implied-timescale sweep). Trails-MD ships
 utilities to turn these into figures.
 
 ## One-command report
 
 ```bash
-autosampler-analyze --run-dir runs/adaptive_msm_vampnet
+trails-md-analyze --run-dir runs/adaptive_msm_vampnet
 # -> runs/adaptive_msm_vampnet/analysis/convergence_report.png
 ```
 
@@ -21,7 +21,7 @@ network). Options: `--outfile`, `--temperature` (for free energies in kJ/mol).
 Data utilities (no matplotlib required):
 
 ```python
-from autosampler.analysis import data
+from trails_md.analysis import data
 
 series = data.load_msm_series("runs/my_run")     # iterations, vamp2, timescales
 latest = data.load_latest_msm("runs/my_run")     # arrays of the last msm.npz
@@ -32,11 +32,11 @@ F = data.free_energy_from_populations(latest["metastable_populations"])
 Fxy, xe, ye = data.free_energy_surface(points, bins=60, temperature=300.0)
 ```
 
-Plotting (needs `pip install "autosampler[examples]"`); each function takes an
+Plotting (needs `pip install "trails-md[examples]"`); each function takes an
 optional `ax` and returns it:
 
 ```python
-from autosampler.analysis import plots
+from trails_md.analysis import plots
 
 plots.plot_vamp2_convergence(series)
 plots.plot_timescale_convergence(series)

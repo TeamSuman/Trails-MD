@@ -1,8 +1,8 @@
 cff-version: 1.2.0
-message: "If you use AutoSampler in your research, please cite it as below."
-title: "AutoSampler: an MSM-convergence-driven adaptive sampling framework for molecular dynamics"
+message: "If you use Trails-MD in your research, please cite it as below."
+title: "Trails-MD: an MSM-convergence-driven adaptive sampling framework for molecular dynamics"
 abstract: >-
-  AutoSampler is a modular framework for autonomous adaptive molecular-dynamics
+  Trails-MD is a modular framework for autonomous adaptive molecular-dynamics
   sampling. It runs short MD walkers, projects frames into fixed or machine-learned
   collective-variable spaces, restarts walkers from informative regions, builds a
   Markov State Model each iteration, and stops when the MSM has converged.
@@ -23,8 +23,8 @@ authors:
     # affiliation: "S. N. Bose National Centre for Basic Sciences"
 version: 2.0.0
 license: MIT
-repository-code: "https://github.com/TeamSuman/AutoSampler"
-url: "https://github.com/TeamSuman/AutoSampler"
+repository-code: "https://github.com/TeamSuman/Trails-MD"
+url: "https://github.com/TeamSuman/Trails-MD"
 keywords:
   - molecular dynamics
   - adaptive sampling

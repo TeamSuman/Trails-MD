@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from autosampler.spawners.density import _weighted_choice
+from trails_md.spawners.density import _weighted_choice
 
 
 def test_weighted_choice_with_mostly_zero_weights():

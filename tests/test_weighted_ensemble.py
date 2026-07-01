@@ -9,8 +9,8 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-from autosampler.binning.we import WeightedEnsemble  # noqa: E402
-from autosampler.spawners import SpawnerFactory  # noqa: E402
+from trails_md.binning.we import WeightedEnsemble  # noqa: E402
+from trails_md.spawners import SpawnerFactory  # noqa: E402
 
 
 def test_split_low_population_bin():

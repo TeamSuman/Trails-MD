@@ -9,8 +9,8 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-from autosampler.engines.base import md_subprocess_timeout  # noqa: E402
-from autosampler.reporting import IterationReporter  # noqa: E402
+from trails_md.engines.base import md_subprocess_timeout  # noqa: E402
+from trails_md.reporting import IterationReporter  # noqa: E402
 
 
 def test_reporter_plain_and_colored():
@@ -25,19 +25,19 @@ def test_reporter_plain_and_colored():
 
 
 def test_md_subprocess_timeout(monkeypatch):
-    monkeypatch.delenv("AUTOSAMPLER_MD_TIMEOUT", raising=False)
+    monkeypatch.delenv("TRAILS_MD_TIMEOUT", raising=False)
     assert md_subprocess_timeout() is None
-    monkeypatch.setenv("AUTOSAMPLER_MD_TIMEOUT", "120")
+    monkeypatch.setenv("TRAILS_MD_TIMEOUT", "120")
     assert md_subprocess_timeout() == 120.0
-    monkeypatch.setenv("AUTOSAMPLER_MD_TIMEOUT", "0")
+    monkeypatch.setenv("TRAILS_MD_TIMEOUT", "0")
     assert md_subprocess_timeout() is None  # non-positive ignored
-    monkeypatch.setenv("AUTOSAMPLER_MD_TIMEOUT", "not-a-number")
+    monkeypatch.setenv("TRAILS_MD_TIMEOUT", "not-a-number")
     assert md_subprocess_timeout() is None
 
 
 def test_checkpoint_format_version(tmp_path):
     pytest.importorskip("torch")
-    from autosampler.checkpoints.manager import (
+    from trails_md.checkpoints.manager import (
         CHECKPOINT_FORMAT_VERSION,
         CheckpointManager,
     )
@@ -64,7 +64,7 @@ def test_checkpoint_format_version(tmp_path):
 def test_fited_to_fitted_pickle_shim():
     pytest.importorskip("torch")
     pytest.importorskip("deeptime")
-    from autosampler.spaces.model import AdaptiveSpaceModel
+    from trails_md.spaces.model import AdaptiveSpaceModel
 
     model = AdaptiveSpaceModel(space_mode="pca")
     # Simulate a legacy pickle state that used the misspelled attribute.
@@ -79,7 +79,7 @@ def test_fited_to_fitted_pickle_shim():
 def test_validate_trajectory_files(tmp_path):
     pytest.importorskip("openmm")
     pytest.importorskip("MDAnalysis")
-    from autosampler.core import AutoSamplerCore
+    from trails_md.core import TrailsMDCore
 
     good = tmp_path / "ok.xtc"
     good.write_bytes(b"\x00\x01\x02")
@@ -88,16 +88,16 @@ def test_validate_trajectory_files(tmp_path):
     missing = tmp_path / "missing.xtc"
 
     # All good -> no error.
-    AutoSamplerCore._validate_trajectory_files([str(good)])
+    TrailsMDCore._validate_trajectory_files([str(good)])
     # Empty or missing -> RuntimeError listing the offenders.
     with pytest.raises(RuntimeError, match="empty"):
-        AutoSamplerCore._validate_trajectory_files([str(good), str(empty)])
+        TrailsMDCore._validate_trajectory_files([str(good), str(empty)])
     with pytest.raises(RuntimeError, match="missing"):
-        AutoSamplerCore._validate_trajectory_files([str(missing)])
+        TrailsMDCore._validate_trajectory_files([str(missing)])
 
 
 def test_no_weresampler_import():
     # The dead WEResampler stub and its export were removed in Phase 2.
-    import autosampler.binning as binning
+    import trails_md.binning as binning
 
     assert not hasattr(binning, "WEResampler")

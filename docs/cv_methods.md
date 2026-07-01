@@ -3,9 +3,9 @@
 > Primary references for TICA, VAMPNets, SPIB, deep-TICA, etc. are collected on
 > the [References](references.md) page.
 
-AutoSampler can sample in **fixed** physical CVs or **learn** CVs on the fly.
+Trails-MD can sample in **fixed** physical CVs or **learn** CVs on the fly.
 The available learned methods live in a single registry
-(`autosampler/spaces/registry.py`), which also tracks each method's backend and
+(`trails_md/spaces/registry.py`), which also tracks each method's backend and
 whether it is available in your environment.
 
 ## Available methods
@@ -64,23 +64,23 @@ same policy.
 
 ## Availability checks
 
-If a method's backend is missing, AutoSampler raises an actionable error, e.g.:
+If a method's backend is missing, Trails-MD raises an actionable error, e.g.:
 
 ```text
 CV method 'deep-tica' requires missing package(s): mlcolvar, lightning.
-Install via: pip install "autosampler[deep-tica]".
+Install via: pip install "trails-md[deep-tica]".
 ```
 
 Programmatically:
 
 ```python
-from autosampler.spaces.registry import is_available, adaptive_modes
+from trails_md.spaces.registry import is_available, adaptive_modes
 adaptive_modes()          # ('pca','tica','tvae','vampnet','spib','deep-tica','deep-lda')
 is_available("vampnet")   # True / False
 ```
 
 ## Adding a new CV method
 
-Register a `CVMethod` in `autosampler/spaces/registry.py` and add a branch in
+Register a `CVMethod` in `trails_md/spaces/registry.py` and add a branch in
 `AdaptiveSpaceModel.fit` / `.project`. The rest of the framework (training
 cadence, MSM, spawning) works unchanged.

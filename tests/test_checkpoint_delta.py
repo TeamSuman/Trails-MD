@@ -12,7 +12,7 @@ import pickle
 
 import pytest
 
-from autosampler.checkpoints.manager import CheckpointManager
+from trails_md.checkpoints.manager import CheckpointManager
 
 
 def test_delta_history_roundtrip(tmp_path):
@@ -65,7 +65,7 @@ def test_checkpoint_writes_are_atomic(tmp_path):
 
 
 def test_paths_load_history_reconstructs_full_history(tmp_path):
-    from autosampler.paths import load_history
+    from trails_md.paths import load_history
 
     mgr = CheckpointManager(str(tmp_path / "checkpoints"))
     mgr.save(0, None, {}, {}, {0: {"frames": []}})

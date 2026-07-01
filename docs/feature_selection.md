@@ -1,7 +1,7 @@
 # Feature selection (VAMP-2)
 
 The quality of a learned CV — and the MSM built on it — is bounded by the
-**input features** fed to it. AutoSampler can **select and adaptively update**
+**input features** fed to it. Trails-MD can **select and adaptively update**
 those features automatically using the **VAMP-2 score**, a variational measure
 of how much slow kinetic variance a feature set captures (Wu & Noé 2017;
 Scherer et al. 2019). Higher VAMP-2 = better features.
@@ -16,7 +16,7 @@ For learned CVs, features are extracted from each trajectory according to:
   contribute.
 
 Without VAMP-2 selection these features are fixed for the whole run. With it,
-AutoSampler keeps the **subset of feature columns that best resolves the slow
+Trails-MD keeps the **subset of feature columns that best resolves the slow
 dynamics**, and refreshes that subset as more of the landscape is explored.
 
 ## Enabling it
@@ -48,7 +48,7 @@ feature set that retains essentially all of the kinetic variance.
 
 ```python
 import numpy as np
-from autosampler.spaces.feature_selection import (
+from trails_md.spaces.feature_selection import (
     vamp2_score, rank_candidates, greedy_vamp_selection, FeatureSelector,
 )
 
@@ -68,7 +68,7 @@ sel.columns, sel.score
 
 ## Choosing among feature *types*
 
-Beyond selecting columns within one feature type, AutoSampler can rank whole
+Beyond selecting columns within one feature type, Trails-MD can rank whole
 **feature types** by VAMP-2 and use the best one. List the candidates and the
 loop extracts each, ranks them, and switches to the winner (re-running column
 selection when the type changes):

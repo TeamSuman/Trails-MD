@@ -1,6 +1,6 @@
-# AutoSampler
+# Trails-MD
 
-AutoSampler is a Python framework for adaptive molecular dynamics campaigns.
+Trails-MD is a Python framework for adaptive molecular dynamics campaigns.
 It runs many short MD walkers, projects saved frames into a collective-variable
 or learned latent space, chooses informative restart frames, and repeats the
 cycle — continuing until a **Markov State Model (MSM)** built on the sampled
@@ -26,7 +26,7 @@ rewriting the whole pipeline.
 - **HPC scalability** — run on a multi-GPU workstation or dispatch walkers as
   **SLURM** / **PBS** array jobs (`execution.backend`).
 
-Get started in one command — `autosampler-init` writes an annotated input file
+Get started in one command — `trails-md-init` writes an annotated input file
 covering every method, feature, and hyperparameter (see
 [`docs/input_file.md`](docs/input_file.md)). A runnable
 [notebook tutorial](examples/notebooks/adaptive_msm_tutorial.ipynb) with rendered
@@ -43,7 +43,7 @@ Adaptive sampling attacks this by running short trajectory batches and restartin
 new walkers from frames that look under-sampled, unusual, far apart, or close to
 a target region.
 
-AutoSampler focuses on three practical requirements:
+Trails-MD focuses on three practical requirements:
 
 - **Modularity:** OpenMM, GROMACS, and Amber-style engines share the same
   adaptive loop.
@@ -56,13 +56,13 @@ AutoSampler focuses on three practical requirements:
 
 The AIB9 and alanine dipeptide examples illustrate the intended scientific use:
 coverage in a projected space is not automatically a transition pathway.
-AutoSampler records lineage so basin discovery can be distinguished from a
+Trails-MD records lineage so basin discovery can be distinguished from a
 connected mechanistic path.
 
 ## Repository Structure
 
 ```text
-autosampler/
+trails_md/
   cli.py                    Command-line entry point for adaptive runs
   config.py                 Pydantic configuration schema
   core.py                   Main adaptive sampling controller
@@ -82,12 +82,12 @@ examples/
 
 ## Installation
 
-Create the conda environment from `env.yml`. It installs AutoSampler in editable
+Create the conda environment from `env.yml`. It installs Trails-MD in editable
 mode and uses the project metadata in `pyproject.toml`.
 
 ```bash
 conda env create -f env.yml
-conda activate autosampler
+conda activate trails-md
 ```
 
 Optional Deep-TICA extras:
@@ -107,31 +107,31 @@ backends:
 Validate a configuration before running MD:
 
 ```bash
-autosampler --config examples/AlaD/config.yaml --check
+trails-md --config examples/AlaD/config.yaml --check
 ```
 
 Run an adaptive campaign:
 
 ```bash
-autosampler --config examples/AlaD/config.yaml --iterations 20
+trails-md --config examples/AlaD/config.yaml --iterations 20
 ```
 
 Resume from the latest checkpoint:
 
 ```bash
-autosampler --config examples/AlaD/config.yaml --resume --iterations 20
+trails-md --config examples/AlaD/config.yaml --resume --iterations 20
 ```
 
 Resume from a specific checkpoint:
 
 ```bash
-autosampler --config examples/AlaD/config.yaml --resume 10 --iterations 20
+trails-md --config examples/AlaD/config.yaml --resume 10 --iterations 20
 ```
 
 Generate a post-hoc exploration log for a completed run:
 
 ```bash
-autosampler-log \
+trails-md-log \
   --run-dir examples/AlaD/runs/alad_phi_psi_density \
   --config examples/AlaD/config.yaml
 ```
@@ -139,7 +139,7 @@ autosampler-log \
 Reconstruct a connected lineage path between two CV-space points:
 
 ```bash
-autosampler-path \
+trails-md-path \
   --run-dir examples/AlaD/runs/alad_phi_psi_density \
   --topology examples/AlaD/start.gro \
   --start=-1.05,-0.70 \
@@ -154,7 +154,7 @@ For batch path extraction, use `--pairs-file` and `--output-dir`.
 Main adaptive runner:
 
 ```text
-usage: autosampler [-h] [--config CONFIG] [--iterations ITERATIONS]
+usage: trails-md [-h] [--config CONFIG] [--iterations ITERATIONS]
                    [--resume [RESUME]] [--check]
                    [--log-level {CRITICAL,ERROR,WARNING,INFO,DEBUG}]
 
@@ -170,7 +170,7 @@ options:
 Connected path post-processing:
 
 ```text
-usage: autosampler-path --run-dir RUN_DIR --topology TOPOLOGY
+usage: trails-md-path --run-dir RUN_DIR --topology TOPOLOGY
                         [--start START] [--end END] [--output OUTPUT]
                         [--pairs-file PAIRS_FILE] [--output-dir OUTPUT_DIR]
                         [--metadata METADATA] [--checkpoint CHECKPOINT]
@@ -179,7 +179,7 @@ usage: autosampler-path --run-dir RUN_DIR --topology TOPOLOGY
 Exploration log generation:
 
 ```text
-usage: autosampler-log --run-dir RUN_DIR [--config CONFIG]
+usage: trails-md-log --run-dir RUN_DIR [--config CONFIG]
                        [--output OUTPUT] [--n-bins N_BINS]
                        [--min-values MIN_VALUES] [--max-values MAX_VALUES]
                        [--append]
@@ -226,7 +226,7 @@ See `examples/AlaD/project_phi_psi.py` and
 
 ## Spawning Strategies
 
-AutoSampler currently supports:
+Trails-MD currently supports:
 
 - `density`: regular-grid low-population bin selection.
 - `voronoi`: KMeans-backed Voronoi cells with exact clipped polygon areas.
@@ -242,7 +242,7 @@ The regular `n_bins` grid is still used for run-log coverage diagnostics.
 
 The sampling space is chosen with `space_mode`. Beyond fixed user CVs, several
 learned CV methods are available through a single registry
-(`autosampler/spaces/registry.py`), so new methods can be added in one place:
+(`trails_md/spaces/registry.py`), so new methods can be added in one place:
 
 | `space_mode` | Method | Backend | Notes |
 |--------------|--------|---------|-------|
@@ -252,7 +252,7 @@ learned CV methods are available through a single registry
 | `tvae`       | Time-lagged VAE | deeptime + torch | nonlinear bottleneck |
 | `vampnet`    | VAMPNet | deeptime + torch | trained with the VAMP-2 score |
 | `spib`       | State Predictive Information Bottleneck | built-in (torch) | Wang & Tiwary 2021 |
-| `deep-tica`  | Deep (nonlinear) TICA | mlcolvar (optional) | `pip install "autosampler[deep-tica]"` |
+| `deep-tica`  | Deep (nonlinear) TICA | mlcolvar (optional) | `pip install "trails-md[deep-tica]"` |
 | `deep-lda`   | Deep LDA (supervised) | mlcolvar (optional) | needs state labels |
 
 `vampnet` and `spib` work out of the box (only deeptime/torch). Optional methods
@@ -260,7 +260,7 @@ raise a clear, actionable error if their backend is missing.
 
 ## MSM-Based Convergence
 
-With `msm.enabled: true`, AutoSampler builds a Markov State Model over the CV
+With `msm.enabled: true`, Trails-MD builds a Markov State Model over the CV
 space each iteration (clustering → transition counts → MLE/Bayesian MSM →
 implied timescales, VAMP-2 score, PCCA+ metastable states) and stops sampling
 once the MSM has **converged**. Convergence is decided by a composable
@@ -288,13 +288,13 @@ complete MSM-driven adaptive-sampling configuration.
 4. **Preflight the run.**
 
     ```bash
-    autosampler --config config.yaml --check
+    trails-md --config config.yaml --check
     ```
 
 5. **Run adaptive sampling.**
 
     ```bash
-    autosampler --config config.yaml --iterations 100
+    trails-md --config config.yaml --iterations 100
     ```
 
 6. **Monitor `output.log`.**
@@ -305,7 +305,7 @@ complete MSM-driven adaptive-sampling configuration.
 7. **Resume if needed.**
 
     ```bash
-    autosampler --config config.yaml --resume --iterations 50
+    trails-md --config config.yaml --resume --iterations 50
     ```
 
 8. **Analyze coverage and endpoints.**
@@ -313,7 +313,7 @@ complete MSM-driven adaptive-sampling configuration.
    sampled CV space.
 
 9. **Check lineage before claiming a pathway.**
-   Use `autosampler-path` to reconstruct connected trajectories. Endpoint
+   Use `trails-md-path` to reconstruct connected trajectories. Endpoint
    proximity alone does not prove that a transition was sampled.
 
 10. **Archive configs, logs, checkpoints, and analysis.**
@@ -326,22 +326,22 @@ Alanine dipeptide:
 
 ```bash
 cd examples/AlaD
-autosampler --config config.yaml --check
-autosampler --config config.yaml --iterations 2
+trails-md --config config.yaml --check
+trails-md --config config.yaml --iterations 2
 ```
 
 AlaD Voronoi smoke test:
 
 ```bash
 cd examples/AlaD
-autosampler --config config_voronoi.yaml --iterations 1
+trails-md --config config_voronoi.yaml --iterations 1
 ```
 
 AIB9 fixed phi/psi CV:
 
 ```bash
 cd examples/AIB9
-autosampler --config config_fixed_phi_psi.yaml --check
+trails-md --config config_fixed_phi_psi.yaml --check
 ```
 
 ## Current Status
@@ -353,6 +353,6 @@ validation.
 
 ## How to cite
 
-If you use AutoSampler in your research, please cite it. Citation metadata is in
+If you use Trails-MD in your research, please cite it. Citation metadata is in
 [`CITATION.cff`](CITATION.cff) (GitHub renders a "Cite this repository" button
 from it). A DOI and the accompanying publication will be added on release.

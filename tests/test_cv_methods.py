@@ -9,7 +9,7 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-from autosampler.spaces.registry import (  # noqa: E402
+from trails_md.spaces.registry import (  # noqa: E402
     FIXED_MODE,
     adaptive_modes,
     ensure_available,
@@ -67,7 +67,7 @@ def _three_state_chain(n_steps=12000, seed=0, p_escape=0.03):
 pytest.importorskip("torch")
 pytest.importorskip("deeptime")
 
-from autosampler.spaces.model import AdaptiveSpaceModel  # noqa: E402
+from trails_md.spaces.model import AdaptiveSpaceModel  # noqa: E402
 
 
 @pytest.mark.parametrize("mode", ["vampnet", "spib"])

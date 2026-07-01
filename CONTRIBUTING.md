@@ -1,13 +1,13 @@
-# Contributing to AutoSampler
+# Contributing to Trails-MD
 
-Thanks for your interest in improving AutoSampler. This guide covers the
+Thanks for your interest in improving Trails-MD. This guide covers the
 development workflow, coding standards, and how to add new components.
 
 ## Development setup
 
 ```bash
 conda env create -f env.yml
-conda activate autosampler
+conda activate trails-md
 pip install -e ".[all]"        # runtime + deep-tica + examples + test extras
 pip install pre-commit && pre-commit install
 ```
@@ -35,21 +35,21 @@ covered.
 
 - Target Python 3.10+. Use type hints on public functions.
 - Formatting and linting are enforced by ruff/black (line length 88).
-- Keep presentation/IO out of core logic (see `autosampler/reporting.py`).
+- Keep presentation/IO out of core logic (see `trails_md/reporting.py`).
 - Prefer the existing factory/registry patterns when adding components.
 
 ## Adding components
 
-AutoSampler is built around small registries so new methods slot in cleanly:
+Trails-MD is built around small registries so new methods slot in cleanly:
 
 - **MD engine** — subclass `MDEngine` and call `EngineFactory.register(...)`
-  in `autosampler/engines/`.
+  in `trails_md/engines/`.
 - **Spawner** — subclass `Spawner` and call `SpawnerFactory.register(...)`
-  in `autosampler/spawners/`.
-- **CV method** — add a `CVMethod` to `autosampler/spaces/registry.py` and a
+  in `trails_md/spawners/`.
+- **CV method** — add a `CVMethod` to `trails_md/spaces/registry.py` and a
   branch in `AdaptiveSpaceModel.fit` / `.project`.
 - **MSM convergence criterion** — subclass `ConvergenceCriterion` and register
-  it in `autosampler/msm/convergence.py`.
+  it in `trails_md/msm/convergence.py`.
 
 ## Commit / PR guidelines
 

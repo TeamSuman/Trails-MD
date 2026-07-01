@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore")
 
 
 def test_seed_manager_enables_deterministic_mode():
-    from autosampler.utils.seeds import SeedManager
+    from trails_md.utils.seeds import SeedManager
 
     SeedManager(123).set_seed()  # must not raise even with deterministic algos on
     a = np.random.rand(5)
@@ -23,7 +23,7 @@ def test_seed_manager_enables_deterministic_mode():
 def test_adaptive_model_carries_seed():
     torch = pytest.importorskip("torch")
     pytest.importorskip("deeptime")
-    from autosampler.spaces.model import AdaptiveSpaceModel
+    from trails_md.spaces.model import AdaptiveSpaceModel
 
     m = AdaptiveSpaceModel(space_mode="vampnet", seed=7)
     assert m.seed == 7
@@ -38,7 +38,7 @@ def test_adaptive_model_carries_seed():
 def test_same_seed_gives_identical_vampnet_projection():
     pytest.importorskip("torch")
     pytest.importorskip("deeptime")
-    from autosampler.spaces.model import AdaptiveSpaceModel
+    from trails_md.spaces.model import AdaptiveSpaceModel
 
     rng = np.random.default_rng(0)
     # Two metastable blobs, ordered by walker then time (2 walkers).

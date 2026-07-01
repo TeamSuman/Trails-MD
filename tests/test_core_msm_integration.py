@@ -1,4 +1,4 @@
-"""Integration test for the MSM wiring inside AutoSamplerCore.
+"""Integration test for the MSM wiring inside TrailsMDCore.
 
 Exercises the real ``_collect_msm_trajectories`` and ``_maybe_build_msm``
 methods against a synthetic run ``history``, without launching MD. The core
@@ -15,10 +15,10 @@ import pytest
 
 pytest.importorskip("deeptime")
 pytest.importorskip("torch")
-core = pytest.importorskip("autosampler.core")
+core = pytest.importorskip("trails_md.core")
 
-from autosampler.config import MSMConfig, SpawningConfig  # noqa: E402
-from autosampler.msm import MSMEstimator, build_monitor_from_config  # noqa: E402
+from trails_md.config import MSMConfig, SpawningConfig  # noqa: E402
+from trails_md.msm import MSMEstimator, build_monitor_from_config  # noqa: E402
 
 
 def _three_state_chain(n_steps, seed, p_escape=0.02):
@@ -41,8 +41,8 @@ def _three_state_chain(n_steps, seed, p_escape=0.02):
 
 
 def _make_core(tmp_path, msm_cfg):
-    """Build a minimal AutoSamplerCore without running its MD-heavy __init__."""
-    sampler = object.__new__(core.AutoSamplerCore)
+    """Build a minimal TrailsMDCore without running its MD-heavy __init__."""
+    sampler = object.__new__(core.TrailsMDCore)
     sampler.config = types.SimpleNamespace(
         msm=msm_cfg,
         spawning=SpawningConfig(walker=4, step=2000, stride=10),

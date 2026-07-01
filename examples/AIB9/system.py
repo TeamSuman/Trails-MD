@@ -1,4 +1,4 @@
-"""OpenMM system loader for the AIB9 AutoSampler example."""
+"""OpenMM system loader for the AIB9 Trails-MD example."""
 
 from __future__ import annotations
 

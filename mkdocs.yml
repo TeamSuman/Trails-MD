@@ -1,6 +1,6 @@
-site_name: AutoSampler
+site_name: Trails-MD
 site_description: Autonomous adaptive MD sampling driven to MSM convergence
-repo_url: https://github.com/TeamSuman/AutoSampler
+repo_url: https://github.com/TeamSuman/Trails-MD
 theme:
   name: material
   palette:

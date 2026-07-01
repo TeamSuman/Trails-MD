@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Plot AIB9 phi/psi exploration from AutoSampler outputs."""
+"""Plot AIB9 phi/psi exploration from Trails-MD outputs."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 
-from autosampler.spaces.features import FeatureExtractor
+from trails_md.spaces.features import FeatureExtractor
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -54,7 +54,7 @@ def _trajectory_sort_key(path: Path) -> tuple[int, int, str]:
 def find_trajectories(outdir: Path) -> list[Path]:
     trajectories = sorted(outdir.glob("iter_*/iteration_*_*.xtc"), key=_trajectory_sort_key)
     if not trajectories:
-        raise FileNotFoundError(f"No AutoSampler XTC files found under {outdir}")
+        raise FileNotFoundError(f"No Trails-MD XTC files found under {outdir}")
     return trajectories
 
 
@@ -85,7 +85,7 @@ def plot_residue(
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.45)
     cbar = fig.colorbar(scatter, ax=ax)
-    cbar.set_label("AutoSampler iteration")
+    cbar.set_label("Trails-MD iteration")
     fig.tight_layout()
     fig.savefig(output, dpi=300, bbox_inches="tight")
     plt.close(fig)

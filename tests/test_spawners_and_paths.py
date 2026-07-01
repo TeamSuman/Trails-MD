@@ -1,12 +1,12 @@
 """Coverage for the previously-untested spawners (voronoi/lof/fps) and the
-trajectory-lineage helpers in autosampler.paths."""
+trajectory-lineage helpers in trails_md.paths."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from autosampler.spawners.base import SpawnerFactory
+from trails_md.spawners.base import SpawnerFactory
 
 
 def _cloud(n=40, seed=0):
@@ -57,7 +57,7 @@ def test_spawner_factory_unknown_scheme():
 
 
 # ── paths / lineage helpers ─────────────────────────────────────────────────
-from autosampler import paths  # noqa: E402
+from trails_md import paths  # noqa: E402
 
 
 def test_frame_key_and_frameref_roundtrip():

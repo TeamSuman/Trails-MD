@@ -1,12 +1,12 @@
-# AutoSampler
+# Trails-MD
 
-**AutoSampler** is a modular framework for **autonomous adaptive molecular
+**Trails-MD** is a modular framework for **autonomous adaptive molecular
 dynamics sampling**. It runs many short MD walkers, projects frames into a
 fixed or machine-learned collective-variable (CV) space, restarts walkers from
 informative regions, and repeats — continuing until a **Markov State Model
 (MSM)** built on the sampled data has **converged**.
 
-## Why AutoSampler
+## Why Trails-MD
 
 - **MSM-convergence driven.** Sampling proceeds until implied timescales and the
   VAMP-2 score plateau, *and* the flux-weighted statistical error on the

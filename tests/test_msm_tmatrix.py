@@ -10,9 +10,9 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-from autosampler.msm import TransitionMatrixCriterion  # noqa: E402
-from autosampler.msm.diagnostics import MSMResult  # noqa: E402
-from autosampler.spawners import SpawnerFactory  # noqa: E402
+from trails_md.msm import TransitionMatrixCriterion  # noqa: E402
+from trails_md.msm.diagnostics import MSMResult  # noqa: E402
+from trails_md.spawners import SpawnerFactory  # noqa: E402
 
 
 def _result(T, pi, counts, *, eigenvectors=None, symbols=None):
@@ -137,7 +137,7 @@ def _three_state_chain(n=20000, p=0.02, seed=0):
 
 def test_estimator_populates_tmatrix_fields():
     pytest.importorskip("deeptime")
-    from autosampler.msm import MSMEstimator
+    from trails_md.msm import MSMEstimator
 
     est = MSMEstimator(lagtime=5, n_microstates=30, n_metastable=3, n_timescales=2)
     res = est.fit([_three_state_chain()])
@@ -149,7 +149,7 @@ def test_estimator_populates_tmatrix_fields():
 
 def test_stable_clustering_runs_and_keeps_cluster_count():
     pytest.importorskip("deeptime")
-    from autosampler.msm import MSMEstimator
+    from trails_md.msm import MSMEstimator
 
     est = MSMEstimator(lagtime=5, n_microstates=25, stable_clustering=True)
     traj = _three_state_chain()

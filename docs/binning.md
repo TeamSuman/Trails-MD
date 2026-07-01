@@ -45,6 +45,6 @@ n_bins: [30, 30]       # number of bins per CV axis (target count for adaptive s
 ## Extending
 
 Register a new scheme by subclassing `AdaptiveBinner`
-(`autosampler/binning/adaptive.py`) — implement `_axis_edges` (and optionally
+(`trails_md/binning/adaptive.py`) — implement `_axis_edges` (and optionally
 `_coords`) — and adding it to `BinnerFactory`. It then works with both spawners
 unchanged.

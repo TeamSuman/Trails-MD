@@ -7,15 +7,15 @@ single YAML **input file**. There is no code to write for a standard run.
 ## Get a starter file
 
 ```bash
-autosampler-init                 # writes ./config.yaml (annotated template)
-autosampler-init -o my_run.yaml  # custom path
+trails-md-init                 # writes ./config.yaml (annotated template)
+trails-md-init -o my_run.yaml  # custom path
 ```
 
 Then edit it and validate before running:
 
 ```bash
-autosampler --config config.yaml --check     # checks files, engine, settings
-autosampler --config config.yaml --iterations 200
+trails-md --config config.yaml --check     # checks files, engine, settings
+trails-md --config config.yaml --iterations 200
 ```
 
 The starter file is also at `examples/template.yaml`, and worked examples live
@@ -70,14 +70,14 @@ statistical error). See [MSM & convergence](msm.md).
 ```
 
 !!! note
-    The snippet above is the exact file `autosampler-init` writes. Every field
+    The snippet above is the exact file `trails-md-init` writes. Every field
     is documented inline; the [Configuration reference](configuration.md) lists
     all keys, defaults, and allowed values in table form.
 
 ## How settings flow
 
-`autosampler --config config.yaml` loads the YAML, validates it against the
-schema (`autosampler/config.py`), resolves relative paths, and runs the adaptive
+`trails-md --config config.yaml` loads the YAML, validates it against the
+schema (`trails_md/config.py`), resolves relative paths, and runs the adaptive
 loop. Invalid values (e.g. an unknown `space_mode` or `spawn_scheme`) are
 rejected immediately with a clear message, before any MD is launched.
 ```

@@ -1,7 +1,7 @@
 # References
 
-The methods AutoSampler builds on, with primary references. Cite the relevant
-ones alongside AutoSampler (see [`CITATION.cff`](https://github.com/TeamSuman/AutoSampler/blob/main/CITATION.cff)).
+The methods Trails-MD builds on, with primary references. Cite the relevant
+ones alongside Trails-MD (see [`CITATION.cff`](https://github.com/TeamSuman/Trails-MD/blob/main/CITATION.cff)).
 
 ## Markov state models
 

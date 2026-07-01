@@ -1,7 +1,7 @@
 # Notebook tutorial
 
 A runnable Jupyter notebook with **rendered plots** lives at
-[`examples/notebooks/adaptive_msm_tutorial.ipynb`](https://github.com/TeamSuman/AutoSampler/blob/main/examples/notebooks/adaptive_msm_tutorial.ipynb).
+[`examples/notebooks/adaptive_msm_tutorial.ipynb`](https://github.com/TeamSuman/Trails-MD/blob/main/examples/notebooks/adaptive_msm_tutorial.ipynb).
 It uses small synthetic examples so every figure renders in seconds without
 running molecular dynamics.
 

@@ -9,8 +9,8 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-from autosampler.config import FeatureSelectionConfig  # noqa: E402
-from autosampler.spaces.feature_selection import (  # noqa: E402
+from trails_md.config import FeatureSelectionConfig  # noqa: E402
+from trails_md.spaces.feature_selection import (  # noqa: E402
     FeatureSelector,
     greedy_vamp_selection,
     rank_candidates,
@@ -69,7 +69,7 @@ def test_feature_selector_select_and_serialise():
     selector = FeatureSelector(lagtime=10, method="greedy_vamp", min_gain=1e-3)
     selection = selector.select([traj])
     assert 0 in selection.columns
-    from autosampler.spaces.feature_selection import FeatureSelection
+    from trails_md.spaces.feature_selection import FeatureSelection
 
     restored = FeatureSelection.from_dict(selection.to_dict())
     assert restored.columns == selection.columns

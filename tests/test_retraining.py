@@ -8,7 +8,7 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-from autosampler.spaces.retraining import RetrainController  # noqa: E402
+from trails_md.spaces.retraining import RetrainController  # noqa: E402
 
 
 def test_fixed_policy_matches_legacy_schedule():
@@ -79,23 +79,23 @@ def test_invalid_policy_raises():
 def test_retrain_policy_config_validation():
     from pydantic import ValidationError
 
-    from autosampler.config import AutoSamplerConfig
+    from trails_md.config import TrailsMDConfig
 
     base = {
         "system": {"conf_file": "a", "top_file": "b"},
         "engine": {},
         "spawning": {},
     }
-    cfg = AutoSamplerConfig(**base, retrain_policy="vamp_adaptive")
+    cfg = TrailsMDConfig(**base, retrain_policy="vamp_adaptive")
     assert cfg.retrain_policy == "vamp_adaptive"
     with pytest.raises(ValidationError):
-        AutoSamplerConfig(**base, retrain_policy="banana")
+        TrailsMDConfig(**base, retrain_policy="banana")
 
 
 def test_seed_manager_is_deterministic():
     import numpy as np
 
-    from autosampler.utils.seeds import SeedManager
+    from trails_md.utils.seeds import SeedManager
 
     SeedManager(123).set_seed()
     a = np.random.rand(5)

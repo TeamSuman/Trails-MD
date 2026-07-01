@@ -24,7 +24,7 @@ walkers than slots, walkers are streamed onto slots as they free up.
 ## SLURM
 
 Each iteration's walkers are submitted as **one array job**
-(`#SBATCH --array=0-N`). AutoSampler renders the script, submits with
+(`#SBATCH --array=0-N`). Trails-MD renders the script, submits with
 `sbatch --parsable`, polls `squeue`, and collects per-walker result markers from
 the shared filesystem. Failed or missing walkers are resubmitted up to
 `max_retries` times.
@@ -67,12 +67,12 @@ execution:
 
 - Each walker is a self-contained task pickled to the iteration's `_jobs/`
   directory. An array element loads its task and runs
-  `python -m autosampler.execution.run_task`, writing a JSON **result marker**.
+  `python -m trails_md.execution.run_task`, writing a JSON **result marker**.
 - **Completion is filesystem-driven** (result markers), not scheduler
   accounting — robust to flaky queue state. A walker that dies without a marker
   is treated as failed and resubmitted.
 - Requirements: a **shared filesystem** visible to compute nodes, and the
-  `autosampler` package importable in the job environment (hence `module_loads`
+  `trails-md` package importable in the job environment (hence `module_loads`
   / activating your conda env in the job, e.g. via `extra_directives`).
 
 ## Choosing resources
@@ -83,7 +83,7 @@ platform (or a CPU GROMACS/Amber build) and scale out across many array tasks.
 
 ## Adding a scheduler
 
-Subclass `SchedulerBackend` (`autosampler/execution/scheduler.py`), implement
+Subclass `SchedulerBackend` (`trails_md/execution/scheduler.py`), implement
 the directive/submit/poll hooks, and call
 `ExecutionBackendFactory.register(...)`. The submit → poll → collect → retry
 machinery is inherited.

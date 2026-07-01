@@ -9,7 +9,7 @@ import pytest
 
 warnings.filterwarnings("ignore")
 
-from autosampler.analysis import data  # noqa: E402
+from trails_md.analysis import data  # noqa: E402
 
 
 def _make_run(tmp_path, n_iters=4):
@@ -73,7 +73,7 @@ def test_free_energy_surface(tmp_path):
 
 def test_plots_smoke(tmp_path):
     pytest.importorskip("matplotlib")
-    from autosampler.analysis import plots
+    from trails_md.analysis import plots
 
     run = _make_run(tmp_path)
     out = plots.plot_convergence_report(run)
@@ -91,7 +91,7 @@ def test_plots_smoke(tmp_path):
 
 
 def test_analysis_cli_errors_without_msm(tmp_path):
-    from autosampler.analysis_cli import main
+    from trails_md.analysis_cli import main
 
     with pytest.raises(SystemExit):
         main(["--run-dir", str(tmp_path)])

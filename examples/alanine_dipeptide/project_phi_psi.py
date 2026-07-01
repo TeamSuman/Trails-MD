@@ -1,4 +1,4 @@
-"""Alanine dipeptide phi/psi CV extractor for AutoSampler."""
+"""Alanine dipeptide phi/psi CV extractor for Trails-MD."""
 
 from __future__ import annotations
 

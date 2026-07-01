@@ -4,7 +4,7 @@
 
 ```bash
 conda env create -f env.yml
-conda activate autosampler
+conda activate trails-md
 pip install -e ".[deep-tica]"     # optional deep-TICA / deep-LDA backends
 ```
 
@@ -21,17 +21,17 @@ pip install numpy scipy scikit-learn pydantic pyyaml deeptime pytest torch
 without launching MD:
 
 ```bash
-autosampler --config examples/AlaD/config.yaml --check
+trails-md --config examples/AlaD/config.yaml --check
 ```
 
 ## Run
 
 ```bash
 # Fixed phi/psi CVs, density spawning, 20 iterations
-autosampler --config examples/AlaD/config.yaml --iterations 20
+trails-md --config examples/AlaD/config.yaml --iterations 20
 
 # Adaptive VAMPNet CV + MSM convergence (stops automatically)
-autosampler --config examples/AIB9/config_msm_vampnet.yaml --iterations 200
+trails-md --config examples/AIB9/config_msm_vampnet.yaml --iterations 200
 ```
 
 When `msm.enabled` is set, the run stops as soon as the MSM converges, even if
@@ -42,21 +42,21 @@ the iteration budget is not exhausted.
 Every iteration is checkpointed. Resume from the latest (or a specific) one:
 
 ```bash
-autosampler --config examples/AIB9/config_msm_vampnet.yaml --resume --iterations 50
-autosampler --config examples/AIB9/config_msm_vampnet.yaml --resume 12 --iterations 50
+trails-md --config examples/AIB9/config_msm_vampnet.yaml --resume --iterations 50
+trails-md --config examples/AIB9/config_msm_vampnet.yaml --resume 12 --iterations 50
 ```
 
 ## Inspect results
 
 ```bash
 # Per-iteration coverage / timing log
-autosampler-log --run-dir runs/adaptive_msm_vampnet
+trails-md-log --run-dir runs/adaptive_msm_vampnet
 
 # MSM analysis report (VAMP-2 / timescales / free energy / network)
-autosampler-analyze --run-dir runs/adaptive_msm_vampnet
+trails-md-analyze --run-dir runs/adaptive_msm_vampnet
 
 # Reconstruct a connected path between two CV points
-autosampler-path \
+trails-md-path \
   --run-dir runs/alad_phi_psi_density \
   --topology examples/AlaD/start.gro \
   --start=-1.05,-0.70 --end=1.05,0.70 \

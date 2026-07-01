@@ -1,6 +1,6 @@
 # Tutorial: adaptive sampling to MSM convergence
 
-This walkthrough runs AutoSampler on the **AIB9** peptide, learning a VAMPNet CV
+This walkthrough runs Trails-MD on the **AIB9** peptide, learning a VAMPNet CV
 on the fly, building an MSM each iteration, and stopping automatically when the
 MSM converges. It uses the shipped example
 `examples/AIB9/config_msm_vampnet.yaml`.
@@ -9,7 +9,7 @@ MSM converges. It uses the shipped example
 
 ```bash
 conda env create -f env.yml
-conda activate autosampler
+conda activate trails-md
 pip install -e ".[deep-tica]"
 ```
 
@@ -77,7 +77,7 @@ feature_selection:
 ## 3. Preflight
 
 ```bash
-autosampler --config examples/AIB9/config_msm_vampnet.yaml --check
+trails-md --config examples/AIB9/config_msm_vampnet.yaml --check
 ```
 
 This validates inputs, the engine, and settings without running MD.
@@ -85,7 +85,7 @@ This validates inputs, the engine, and settings without running MD.
 ## 4. Run
 
 ```bash
-autosampler --config examples/AIB9/config_msm_vampnet.yaml --iterations 200 --log-level INFO
+trails-md --config examples/AIB9/config_msm_vampnet.yaml --iterations 200 --log-level INFO
 ```
 
 Each iteration prints a summary banner and appends a row to
@@ -112,13 +112,13 @@ runs/adaptive_msm_vampnet/
 ## 6. Resume if needed
 
 ```bash
-autosampler --config examples/AIB9/config_msm_vampnet.yaml --resume --iterations 100
+trails-md --config examples/AIB9/config_msm_vampnet.yaml --resume --iterations 100
 ```
 
 ## 7. Analyse
 
 ```bash
-autosampler-log --run-dir runs/adaptive_msm_vampnet
+trails-md-log --run-dir runs/adaptive_msm_vampnet
 ```
 
 Load the MSM diagnostics for plotting:

@@ -5,8 +5,8 @@
 # phi/psi dihedral pair; walkers are spawned by density over a phi/psi grid.
 #
 # Regenerate system.xml with:  python examples/alanine_dipeptide/build_system.py
-# Validate:                    autosampler --config examples/alanine_dipeptide/config.yaml --check
-# Run:                         autosampler --config examples/alanine_dipeptide/config.yaml --iterations 5
+# Validate:                    trails-md --config examples/alanine_dipeptide/config.yaml --check
+# Run:                         trails-md --config examples/alanine_dipeptide/config.yaml --iterations 5
 
 system:
   conf_file: structure.pdb

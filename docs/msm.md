@@ -1,12 +1,12 @@
 # MSM & convergence
 
 With `msm.enabled: true`, every iteration (subject to `cadence` and
-`min_frames`) AutoSampler builds a **Markov State Model** from the cumulative
+`min_frames`) Trails-MD builds a **Markov State Model** from the cumulative
 sampled data and uses it to decide when sampling is **complete**.
 
 ## What the MSM estimator does
 
-`autosampler/msm/estimator.py` (`MSMEstimator`, built on `deeptime`) runs:
+`trails_md/msm/estimator.py` (`MSMEstimator`, built on `deeptime`) runs:
 
 1. **Discretise** the CV/latent space into microstates (`cluster_method`:
    `kmeans` or `regspace`, `n_microstates`).

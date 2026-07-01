@@ -3,7 +3,7 @@
 A run is described by a single YAML file (paths are resolved relative to it).
 All sections are validated by Pydantic; unknown or invalid values are rejected
 at startup. Below, only non-obvious defaults are noted — see
-`autosampler/config.py` for the authoritative schema.
+`trails_md/config.py` for the authoritative schema.
 
 ## `system`
 
@@ -30,7 +30,7 @@ at startup. Below, only non-obvious defaults are noted — see
 | `gromacs_*` / `amber_*` | — | Engine-specific executables and `mdrun`/`pmemd` options. |
 
 !!! tip "MD timeouts"
-    Set the `AUTOSAMPLER_MD_TIMEOUT` environment variable (seconds) to guard
+    Set the `TRAILS_MD_TIMEOUT` environment variable (seconds) to guard
     against hung GROMACS/Amber subprocesses.
 
 ## `spawning`

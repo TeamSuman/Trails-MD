@@ -53,4 +53,4 @@ setting and does not affect the science. See [Execution](execution.md).
 - Global deterministic seeding (`random_seed`).
 - Per-iteration checkpoints (`checkpoint_freq`) with `--resume`.
 - Every frame carries lineage (`iteration:walker:frame` + parent), enabling
-  connected-path reconstruction with `autosampler-path`.
+  connected-path reconstruction with `trails-md-path`.
