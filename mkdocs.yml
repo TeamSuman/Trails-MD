@@ -1,43 +1,53 @@
 site_name: Trails-MD
-site_description: Autonomous adaptive MD sampling driven to MSM convergence
+site_description: Adaptive molecular dynamics sampling with engine-agnostic walkers, fixed and learned collective variables, and lineage-aware spawning
+site_url: https://teamsuman.github.io/Trails-MD/
 repo_url: https://github.com/TeamSuman/Trails-MD
 theme:
   name: material
   palette:
-    - scheme: default
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
   features:
     - navigation.sections
+    - navigation.top
     - content.code.copy
 
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
-  - The input file: input_file.md
   - Concepts: concepts.md
+  - The input file: input_file.md
   - Configuration reference: configuration.md
   - Collective variables: cv_methods.md
-  - Feature selection (VAMP-2): feature_selection.md
-  - MSM & convergence: msm.md
-  - Adaptive binning: binning.md
-  - Analysis & plotting: analysis.md
+  - MSM & kinetic seeding: msm.md
   - Execution (workstation & HPC): execution.md
   - CLI reference: cli.md
-  - API reference: api.md
   - References: references.md
-  - Tutorial — adaptive MSM: tutorials/adaptive_msm.md
-  - Tutorial — notebook: notebook_tutorial.md
+  - Tutorials:
+      - Alanine dipeptide: tutorials/alad.md
+      - AIB9: tutorials/aib9.md
+  - Results in the paper: results_in_paper.md
+
+exclude_docs: |
+  feature_selection.md
+  binning.md
+  api.md
+  notebook_tutorial.md
+  analysis.md
+  tutorials/adaptive_msm.md
 
 plugins:
   - search
-  - mkdocstrings:
-      handlers:
-        python:
-          options:
-            show_root_heading: true
-            show_source: false
-            members_order: source
-            docstring_style: numpy
 
 markdown_extensions:
   - admonition

@@ -37,13 +37,12 @@ at startup. Below, only non-obvious defaults are noted — see
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `spawn_scheme` | `density` | `density` \| `voronoi` \| `lof` \| `fps` \| `msm` \| `we`. |
-| `we_target_per_bin` | `4` | Weighted-ensemble walkers per occupied bin (`spawn_scheme: we`). |
+| `spawn_scheme` | `density` | `density` \| `voronoi` \| `lof` \| `fps`. |
 | `spawn_type` | `hard` | `hard` or `probabilistic`. |
 | `search_mode` | `explore` | `explore` or `target` (toward `target`). |
 | `walker` / `step` / `stride` | `10` / `10000` / `100` | Walkers per iteration / MD steps / save interval. |
 | `max_workers` | `4` | Concurrent walkers (local backend). |
-| `voronoi_clusters` | `150` | Cells / microstates (also used by the MSM spawner). |
+| `voronoi_clusters` | `150` | Voronoi cell count (`spawn_scheme: voronoi`). |
 | `target` | — | CV-space target `[x, y, …]` when `search_mode: target`. |
 | `recent_density_window` | `5` | Bins sampled in the last N iterations are down-weighted (`density`). |
 | `lof_neighbors` | `20` | Neighbours for the LOF spawner. |
@@ -61,65 +60,19 @@ at startup. Below, only non-obvious defaults are noted — see
 
 ## `space_mode` and adaptive model
 
-`space_mode`: `fixed` \| `pca` \| `tica` \| `tvae` \| `vampnet` \| `spib` \|
-`deep-tica` \| `deep-lda`. For learned modes:
+`space_mode`: `fixed` \| `pca` \| `tica` \| `tvae` \| `deep-tica`. For learned
+modes:
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `adaptive_feature_type` | `distances` | `distances` \| `fitted_coords` \| `phi_psi`. **Note:** `phi_psi` is currently specific to the AIB9 peptide (it expects 9 `resname AIB` residues) and will raise on other systems — use `distances` or `fitted_coords` for general systems. |
-| `retrain_freq` | `1` | Retrain the CV every N iterations (`fixed` policy). |
-| `retrain_policy` | `fixed` | `fixed` or `vamp_adaptive` (retrain on VAMP-2 drop). |
-| `vamp_retrain_tol` | `0.1` | Relative VAMP-2 drop that triggers a retrain. |
-| `retrain_min_interval` / `retrain_max_interval` | `1` / `None` | Bounds between adaptive retrains. |
+| `retrain_freq` | `1` | Retrain the CV every N iterations. |
 | `aggregate_memory` | `true` | Pool historical frames when retraining. |
 | `max_adaptive_memory_frames` | `50000` | Cap on pooled frames. |
 | `adaptive_model.lagtime` | `5` | Lag time for time-lagged CVs. |
 | `adaptive_model.latent_dim` | `2` | CV dimensionality. |
 | `adaptive_model.epochs` / `learning_rate` | `50` / `5e-4` | Training. |
 | `adaptive_model.encoder_hidden_dims` | `[256,128]` | Network width. |
-| `adaptive_model.spib_n_states` / `spib_beta` | `10` / `1e-3` | SPIB knobs. |
-
-## `feature_selection`
-
-VAMP-2 input-feature selection (opt-in). See [Feature selection](feature_selection.md).
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `enabled` | `false` | Turn feature selection on. |
-| `method` | `greedy_vamp` | `greedy_vamp` \| `all`. |
-| `lagtime` | `10` | Lag time for VAMP-2 scoring. |
-| `cadence` | `5` | Re-select every N iterations. |
-| `max_features` | `None` | Cap on selected columns/groups. |
-| `min_gain` | `1e-4` | Minimum VAMP-2 gain to keep adding features. |
-| `candidate_feature_types` | `[]` | Rank these feature types by VAMP-2 and use the best (subset of `distances`/`fitted_coords`/`phi_psi`). |
-
-## `msm`
-
-Markov State Model estimation and convergence (opt-in). See [MSM](msm.md).
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `enabled` | `false` | Build an MSM each iteration and use MSM convergence. |
-| `cadence` / `min_frames` | `1` / `1000` | MSM cadence / minimum frames before first MSM. |
-| `lagtime` / `lagtimes` | `10` / `None` | MSM lag / implied-timescale sweep. |
-| `n_microstates` / `cluster_method` | `100` / `kmeans` | Discretisation. |
-| `estimator` | `mle` | `mle` or `bayesian` (error bars). |
-| `n_timescales` / `n_metastable` | `3` / `None` | Slow processes / PCCA+ states. |
-| `stable_clustering` | `false` | Seed k-means from previous centres (comparable `T_ij` / microstate IDs across iterations). |
-| `spawn_alpha` / `spawn_leverage` / `spawn_uncertainty` | `1.0` / `1` / `true` | MSM-guided spawner: exploration weight / # slow eigenvectors for leverage / include outflow uncertainty. |
-| `convergence_criteria` | ITS + VAMP-2 | List of `{name, params}`; add `transition_matrix` for flux-weighted `T_ij` convergence. |
-| `convergence_mode` / `convergence_patience` | `all` / `2` | Combine criteria / patience. |
-
-## `binning`
-
-Landscape-adaptive binning for the density / WE spawners. See [Adaptive
-binning](binning.md).
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `scheme` | `uniform` | `uniform` \| `gradient` \| `mab` \| `eigenvector`. |
-| `n_fine` | `100` | Density-histogram resolution (gradient scheme). |
-| `smoothing` | `3` | Density smoothing window (gradient scheme). |
 
 ## `execution`
 

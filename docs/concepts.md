@@ -9,11 +9,13 @@ the next iteration's walkers from. Spawners:
 | `spawn_scheme` | Strategy |
 | --- | --- |
 | `density` | Restart from under-populated regions of a regular grid. |
-| `voronoi` | Restart from sparse Voronoi (k-means) cells. |
+| `voronoi` | Restart from sparse Voronoi (k-means) cells; scales better than a grid in higher-dimensional CV spaces. |
 | `lof` | Restart from statistical outliers (local outlier factor). |
 | `fps` | Farthest-point sampling for maximal coverage. |
-| `msm` | **MSM least-counts**: restart from microstates with the largest statistical uncertainty (drives MSM convergence). |
-| `we` | **Weighted ensemble**: split/merge resampling with conserved statistical weights, keeping a target walker count per bin. |
+
+Any spawner can also be pointed toward a target region of the CV space
+(`search_mode: target`), balancing exploration with progress toward the
+target.
 
 ## CV spaces
 
@@ -21,32 +23,32 @@ A run uses either:
 
 - **Fixed CVs** (`space_mode: fixed`) — a user `project_file` returning physical
   CVs (dihedrals, distances, …), or
-- **Learned CVs** (`space_mode: tica | tvae | vampnet | spib | deep-tica | pca`)
-  — trained on the fly from input features and periodically retrained
-  (`retrain_freq`). See [Collective variables](cv_methods.md).
+- **Learned CVs** (`space_mode: pca | tica | tvae | deep-tica`) — trained on
+  the fly from input features and periodically retrained (`retrain_freq`).
+  See [Collective variables](cv_methods.md).
 
 ## Input features
 
-Learned CVs are trained on **input features** extracted from the trajectories:
-pairwise `distances`, `fitted_coords`, or system-specific dihedrals, restricted
-by the `feature_selection` atom mask. Optionally, a **VAMP-2 feature selector**
-chooses and adaptively updates the best subset — see
-[Feature selection](feature_selection.md).
+Learned CVs are trained on **input features** extracted from the
+trajectories: pairwise `distances`, `fitted_coords`, or system-specific
+dihedrals, restricted by the `feature_selection` atom mask.
 
-## MSM and convergence
+## Convergence
 
-When `msm.enabled` is set, each iteration discretises the CV space into
-microstates, estimates a transition matrix at a lag time, and computes implied
-timescales, the VAMP-2 score, and PCCA+ metastable states. A
-**ConvergenceMonitor** combines pluggable criteria (timescale stability, VAMP-2
-plateau, stationary-distribution drift, statistical error) to decide when
-sampling is complete. See [MSM & convergence](msm.md).
+Sampling proceeds for the configured iteration budget, or stops early when
+grid/Voronoi bin occupancy plateaus (`resolution_check_patience`,
+`convergence_patience` in `spawning`). Because a retrained learned CV space
+can rotate, shift, or scale, bin boundaries are recalculated in the newly
+projected space whenever the model retrains.
+
+After a campaign, representative structures can seed longer production runs
+for post-hoc MSM construction — see [MSM & kinetic seeding](msm.md).
 
 ## Execution
 
 Walkers are dispatched by an **execution backend**: `local` (multi-GPU
-workstation) or `slurm` / `pbs` (HPC array jobs). The choice is purely a config
-setting and does not affect the science. See [Execution](execution.md).
+workstation) or `slurm` / `pbs` (HPC array jobs). The choice is purely a
+config setting and does not affect the science. See [Execution](execution.md).
 
 ## Reproducibility & provenance
 
