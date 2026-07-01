@@ -1,7 +1,7 @@
 # Collective variables
 
-> Primary references for TICA, VAMPNets, SPIB, deep-TICA, etc. are collected on
-> the [References](references.md) page.
+> Primary references for TICA, TVAE, and Deep-TICA are collected on the
+> [References](references.md) page.
 
 Trails-MD can sample in **fixed** physical CVs or **learn** CVs on the fly.
 The available learned methods live in a single registry
@@ -10,15 +10,13 @@ whether it is available in your environment.
 
 ## Available methods
 
-| `space_mode` | Backend | Time-lagged | Notes |
-| --- | --- | --- | --- |
-| `pca` | scikit-learn | no | Linear baseline. |
-| `tica` | deeptime | yes | Linear, dynamics-aware. |
-| `tvae` | deeptime + torch | yes | Time-lagged variational autoencoder. |
-| `vampnet` | deeptime + torch | yes | Deep CVs via the VAMP-2 variational principle. |
-| `spib` | torch (built-in) | yes | State Predictive Information Bottleneck (Wang & Tiwary, 2021). |
-| `deep-tica` | mlcolvar + lightning | yes | Deep nonlinear TICA (optional extra). |
-| `deep-lda` | mlcolvar + lightning | no | Supervised; needs per-frame state labels (optional extra). |
+| `space_mode` | Method                        | Backend               | Notes |
+| ------------- | ----------------------------- | ---------------------- | ----- |
+| `fixed`       | User CVs via a project file   | —                       | e.g. dihedrals, distances. |
+| `pca`         | Principal component analysis  | scikit-learn            | Linear baseline. |
+| `tica`        | Time-lagged ICA               | deeptime                | Linear, dynamics-aware. |
+| `tvae`        | Time-lagged VAE                | deeptime + torch        | Nonlinear bottleneck. |
+| `deep-tica`   | Deep (nonlinear) TICA          | mlcolvar + lightning     | `pip install "trails-md[deep-tica]"`. |
 
 `fixed` mode uses a user `project_file` exposing
 `extract_cvs(trajectories, top_file, conf_file) -> ndarray`.
@@ -26,14 +24,13 @@ whether it is available in your environment.
 ## Choosing a method
 
 - **Start simple:** `tica` (fast, robust, interpretable) or `pca`.
-- **Nonlinear / deep CVs:** `vampnet` or `spib` are strong defaults and need no
-  extra packages beyond torch.
-- **Supervised separation of known states:** `deep-lda`.
+- **Nonlinear CVs:** `tvae` or `deep-tica` when a good linear projection isn't
+  enough to separate conformations that overlap in physical coordinates.
 
 ## Configuring
 
 ```yaml
-space_mode: vampnet
+space_mode: tica
 adaptive_feature_type: distances      # distances | fitted_coords | phi_psi
 retrain_freq: 5                       # retrain the CV every 5 iterations
 adaptive_model:
@@ -41,26 +38,11 @@ adaptive_model:
   latent_dim: 2
   epochs: 50
   encoder_hidden_dims: [64, 32]
-  spib_n_states: 10                   # used when space_mode: spib
-  spib_beta: 0.001
 ```
 
-## Adaptive retraining (VAMP-2 driven)
-
-A learned CV can go stale as new regions are discovered. By default it retrains
-on a fixed schedule (`retrain_freq`). Set `retrain_policy: vamp_adaptive` to
-retrain **only when the CV's VAMP-2 score on fresh data drops** below its
-post-training reference — coupling retraining to sampling progress.
-
-```yaml
-retrain_policy: vamp_adaptive   # fixed | vamp_adaptive
-vamp_retrain_tol: 0.1           # relative VAMP-2 drop that triggers a retrain
-retrain_min_interval: 1         # don't retrain more often than this
-retrain_max_interval: 20        # force a refresh at least this often (optional)
-```
-
-The controller's reference score is checkpointed, so `--resume` continues the
-same policy.
+When a model is retrained, the full accumulated feature history is
+reprojected into the updated latent space before spawning, so selection
+always reflects the current coordinates.
 
 ## Availability checks
 
@@ -74,13 +56,12 @@ Install via: pip install "trails-md[deep-tica]".
 Programmatically:
 
 ```python
-from trails_md.spaces.registry import is_available, adaptive_modes
-adaptive_modes()          # ('pca','tica','tvae','vampnet','spib','deep-tica','deep-lda')
-is_available("vampnet")   # True / False
+from trails_md.spaces.registry import is_available
+is_available("tica")   # True / False
 ```
 
 ## Adding a new CV method
 
 Register a `CVMethod` in `trails_md/spaces/registry.py` and add a branch in
 `AdaptiveSpaceModel.fit` / `.project`. The rest of the framework (training
-cadence, MSM, spawning) works unchanged.
+cadence, spawning) works unchanged.

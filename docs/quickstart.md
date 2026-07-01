@@ -8,8 +8,8 @@ conda activate trails-md
 pip install -e ".[deep-tica]"     # optional deep-TICA / deep-LDA backends
 ```
 
-For a lightweight environment (MSM, CV registry, feature selection, and tests
-without the heavy MD backends):
+For a lightweight environment (CV registry and tests without the heavy MD
+backends):
 
 ```bash
 pip install numpy scipy scikit-learn pydantic pyyaml deeptime pytest torch
@@ -30,30 +30,24 @@ trails-md --config examples/AlaD/config.yaml --check
 # Fixed phi/psi CVs, density spawning, 20 iterations
 trails-md --config examples/AlaD/config.yaml --iterations 20
 
-# Adaptive VAMPNet CV + MSM convergence (stops automatically)
-trails-md --config examples/AIB9/config_msm_vampnet.yaml --iterations 200
+# Learned TICA CV on AIB9
+trails-md --config examples/AIB9/config_target.yaml --iterations 50
 ```
-
-When `msm.enabled` is set, the run stops as soon as the MSM converges, even if
-the iteration budget is not exhausted.
 
 ## Resume
 
 Every iteration is checkpointed. Resume from the latest (or a specific) one:
 
 ```bash
-trails-md --config examples/AIB9/config_msm_vampnet.yaml --resume --iterations 50
-trails-md --config examples/AIB9/config_msm_vampnet.yaml --resume 12 --iterations 50
+trails-md --config examples/AIB9/config_target.yaml --resume --iterations 50
+trails-md --config examples/AIB9/config_target.yaml --resume 12 --iterations 50
 ```
 
 ## Inspect results
 
 ```bash
 # Per-iteration coverage / timing log
-trails-md-log --run-dir runs/adaptive_msm_vampnet
-
-# MSM analysis report (VAMP-2 / timescales / free energy / network)
-trails-md-analyze --run-dir runs/adaptive_msm_vampnet
+trails-md-log --run-dir runs/aib9_target
 
 # Reconstruct a connected path between two CV points
 trails-md-path \
@@ -63,6 +57,5 @@ trails-md-path \
   --output alad_path.xtc
 ```
 
-Each `iter_*/` directory holds the trajectories, `cvs.npz`, optional
-`features.npz`, and (when enabled) `msm.npz`. `output.log` is a tab-separated
-per-iteration record.
+Each `iter_*/` directory holds the trajectories, `cvs.npz`, and optional
+`features.npz`. `output.log` is a tab-separated per-iteration record.

@@ -1,51 +1,59 @@
 # Trails-MD
 
-**Trails-MD** is a modular framework for **autonomous adaptive molecular
-dynamics sampling**. It runs many short MD walkers, projects frames into a
-fixed or machine-learned collective-variable (CV) space, restarts walkers from
-informative regions, and repeats — continuing until a **Markov State Model
-(MSM)** built on the sampled data has **converged**.
+**Trails-MD** is a modular framework for **adaptive molecular dynamics
+campaigns**. It runs many short MD walkers, projects saved frames into a
+fixed or machine-learned collective-variable (CV) space, restarts walkers
+from informative regions, and repeats the cycle.
 
-## Why Trails-MD
+## Key features
 
-- **MSM-convergence driven.** Sampling proceeds until implied timescales and the
-  VAMP-2 score plateau, *and* the flux-weighted statistical error on the
-  transition matrix falls below threshold — not just until bins fill up.
-- **Landscape-adaptive binning.** Optionally place bins finer across barriers and
-  coarser in basins (`gradient` / `mab` / `eigenvector`), recomputed each
-  iteration, instead of a uniform grid.
-- **Learned or fixed CVs.** Use physical CVs (dihedrals, distances, …) or learn
-  them on the fly: TICA, TVAE, **VAMPNet**, **SPIB**, deep-TICA, PCA.
-- **VAMP-2 feature optimisation.** Optionally select and adaptively update the
-  input features that best resolve the slow dynamics.
-- **Runs anywhere.** A multi-GPU workstation (local backend) or CPU/GPU HPC
-  clusters via **SLURM** or **PBS** array jobs, with automatic resubmission.
-- **Reproducible.** Deterministic seeding, full checkpoint/restart, and
-  lineage-aware path reconstruction.
+- **Engine-agnostic walkers.** OpenMM, GROMACS, and Amber share the same
+  adaptive loop.
+- **Fixed or learned sampling spaces.** User-defined physical CVs, PCA, TICA,
+  TVAE, and Deep-TICA, swappable at configuration time.
+- **Interchangeable spawning policies.** Density, Voronoi,
+  local-outlier-factor, and farthest-point selection.
+- **Lineage-aware exploration.** Every spawned frame stores its parent-child
+  ancestry, so connected transition pathways can be reconstructed from
+  otherwise disjoint exploration stages.
+- **Restartable campaigns.** Per-iteration checkpoints capture the adaptive
+  model, feature history, sampling state, and walker coordinates.
+- **HPC scalability.** Run on a multi-GPU workstation or dispatch walkers as
+  **SLURM** / **PBS** array jobs (`execution.backend`).
 
 ## The adaptive loop
 
 ```text
-        ┌─────────────────────────────────────────────────────────┐
-        │  run short MD walkers (local / SLURM / PBS)              │
-        │            │                                            │
-        │   extract features ──► (VAMP-2 feature selection) ──┐   │
-        │            │                                        │   │
-        │   train / update CV (TICA / VAMPNet / SPIB / …)  ◄──┘   │
-        │            │                                            │
-        │   build MSM (clusters → T(τ) → ITS / VAMP-2 / PCCA+)    │
-        │            │                                            │
-        │   converged? ──yes──► stop                              │
-        │            │no                                          │
-        │   spawn new walkers (MSM least-counts / density / …)    │
-        └────────────┴────────────────────────────────────────────┘
+  run short MD walkers (local / SLURM / PBS)
+              |
+  extract features / project to CV space
+              |
+  train or update the CV if space_mode is a learned
+  method (PCA / TICA / TVAE / Deep-TICA)
+              |
+  spawn new walkers (density / Voronoi / LOF / FPS)
+              |
+  iteration budget reached, or bin occupancy
+  plateaued? --- yes ---> stop
+              |
+              no
+              |
+        (back to the top)
 ```
+
+Sampling continues until either the configured iteration budget is reached
+or grid/Voronoi bin occupancy plateaus (see [Concepts](concepts.md)). After a
+campaign, representative structures can seed longer unbiased production runs
+for post-hoc Markov State Model (MSM) construction — see
+[MSM & kinetic seeding](msm.md).
 
 ## Where to go next
 
 - New here? Start with the **[Quickstart](quickstart.md)**.
 - Want the full picture? Read **[Concepts](concepts.md)**.
 - Configuring a run? See the **[Configuration reference](configuration.md)**.
-- Tuning where bins go? See **[Adaptive binning](binning.md)**.
 - Running on a cluster? See **[Execution](execution.md)**.
-- A worked end-to-end example: the **[adaptive-MSM tutorial](tutorials/adaptive_msm.md)**.
+- Worked end-to-end examples: **[Alanine dipeptide](tutorials/alad.md)** and
+  **[AIB9](tutorials/aib9.md)**.
+- Curious what Trails-MD found in the paper? See
+  **[Results in the paper](results_in_paper.md)**.

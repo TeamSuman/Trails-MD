@@ -33,7 +33,9 @@ trails-md-init [-o OUTPUT] [--force]
 
 ## `trails-md-analyze`
 
-Produce a multi-panel MSM convergence report from a run directory.
+Produce a multi-panel MSM convergence report from a run directory. Requires
+`iter_*/msm.npz`, which is only written when the run's config opts in to the
+(experimental, not yet manuscript-scope) in-loop MSM feature.
 
 ```bash
 trails-md-analyze --run-dir RUN_DIR [--outfile FILE] [--temperature K]
