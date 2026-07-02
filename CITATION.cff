@@ -1,36 +1,40 @@
 cff-version: 1.2.0
 message: "If you use Trails-MD in your research, please cite it as below."
-title: "Trails-MD: an MSM-convergence-driven adaptive sampling framework for molecular dynamics"
+title: "TRAILS-MD: Mapping Complex Conformational Landscapes and Transition Pathways via Lightweight Lineage-Aware Adaptive Sampling"
 abstract: >-
-  Trails-MD is a modular framework for autonomous adaptive molecular-dynamics
-  sampling. It runs short MD walkers, projects frames into fixed or machine-learned
-  collective-variable spaces, restarts walkers from informative regions, builds a
-  Markov State Model each iteration, and stops when the MSM has converged.
+  Trails-MD is a lightweight, engine-agnostic adaptive sampling framework
+  that iteratively launches short trajectory ensembles across fixed or
+  on-the-fly machine-learned collective-variable spaces. A defining feature
+  is explicit trajectory lineage preservation, which allows for the rigorous
+  reconstruction of continuous kinetic pathways from highly parallelized,
+  disjointed exploration stages.
 type: software
-# TODO(release): confirm the full author list, ORCIDs, and affiliations before
-# submitting the publication. The entries below are drawn from the repository and
-# must be verified.
+# TODO(release): confirm ORCIDs before submitting the publication.
 authors:
   - family-names: Maity
     given-names: Dibyendu
     email: dibyendumaity1999@bose.res.in
+    affiliation: "S. N. Bose National Centre for Basic Sciences, Kolkata, India"
     # orcid: "https://orcid.org/0000-0000-0000-0000"
-    # affiliation: "S. N. Bose National Centre for Basic Sciences"
+  - family-names: Majumdar
+    given-names: Rupak
+    affiliation: "Max Planck Institute for Software Systems, Kaiserslautern, Germany"
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
   - family-names: Chakrabarty
     given-names: Suman
-    email: chakrabarty.suman@gmail.com
+    email: sumanc@bose.res.in
+    affiliation: "S. N. Bose National Centre for Basic Sciences, Kolkata, India"
     # orcid: "https://orcid.org/0000-0000-0000-0000"
-    # affiliation: "S. N. Bose National Centre for Basic Sciences"
 version: 2.0.0
-license: MIT
+license: PolyForm-Noncommercial-1.0.0
 repository-code: "https://github.com/TeamSuman/Trails-MD"
 url: "https://github.com/TeamSuman/Trails-MD"
 keywords:
   - molecular dynamics
   - adaptive sampling
-  - Markov state model
   - collective variables
-  - enhanced sampling
+  - lineage-aware sampling
+  - Markov state model
 # TODO(release): add the DOI once a Zenodo archive / preprint is minted, and add a
 # `preferred-citation:` block pointing to the journal article when published.
 # doi: "10.5281/zenodo.XXXXXXX"
