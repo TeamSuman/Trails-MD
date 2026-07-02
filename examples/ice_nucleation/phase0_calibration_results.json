@@ -1,0 +1,112 @@
+{
+  "liquid_reference": [
+    {
+      "seed": 0,
+      "n_max": 3,
+      "chi": NaN,
+      "n_ih": 0,
+      "n_ic": 0,
+      "n_interfacial_ice": 46,
+      "n_liquid": 969
+    },
+    {
+      "seed": 1,
+      "n_max": 3,
+      "chi": NaN,
+      "n_ih": 0,
+      "n_ic": 0,
+      "n_interfacial_ice": 47,
+      "n_liquid": 969
+    },
+    {
+      "seed": 2,
+      "n_max": 3,
+      "chi": NaN,
+      "n_ih": 0,
+      "n_ic": 0,
+      "n_interfacial_ice": 32,
+      "n_liquid": 982
+    }
+  ],
+  "ih_reference_sweep": [
+    {
+      "frame": 0,
+      "n_max": 267,
+      "chi": 0.0,
+      "n_ih": 159,
+      "n_ic": 0,
+      "n_interfacial_ice": 156,
+      "n_liquid": 706
+    },
+    {
+      "frame": 62,
+      "n_max": 998,
+      "chi": 0.0,
+      "n_ih": 991,
+      "n_ic": 0,
+      "n_interfacial_ice": 7,
+      "n_liquid": 26
+    },
+    {
+      "frame": 125,
+      "n_max": 997,
+      "chi": 0.0,
+      "n_ih": 985,
+      "n_ic": 0,
+      "n_interfacial_ice": 12,
+      "n_liquid": 27
+    },
+    {
+      "frame": 187,
+      "n_max": 996,
+      "chi": 0.0,
+      "n_ih": 990,
+      "n_ic": 0,
+      "n_interfacial_ice": 6,
+      "n_liquid": 28
+    },
+    {
+      "frame": 249,
+      "n_max": 994,
+      "chi": 0.0,
+      "n_ih": 990,
+      "n_ic": 0,
+      "n_interfacial_ice": 4,
+      "n_liquid": 30
+    }
+  ],
+  "ih_empirical_nn_distance_angstrom": 2.7625269889831543,
+  "ic_reference_synthetic": {
+    "lattice_constant": 6.379782802932122,
+    "n_atoms": 1728,
+    "n_max": 1728,
+    "chi": 1.0,
+    "n_ih": 0,
+    "n_ic": 1728,
+    "n_interfacial_ice": 0,
+    "n_liquid": 0
+  },
+  "gate_checks": [
+    {
+      "description": "Liquid: n_max stays near noise floor (<20) and chi undefined (NaN)",
+      "passed": true
+    },
+    {
+      "description": "Ih: n_max grows to >90% of the box (994/1024)",
+      "passed": true
+    },
+    {
+      "description": "Ih: chi == 0.0 at every sampled frame (no false-positive cubic labels)",
+      "passed": true
+    },
+    {
+      "description": "Ic (synthetic): chi == 1.0 (no false-positive hexagonal labels)",
+      "passed": true
+    },
+    {
+      "description": "Ic (synthetic): n_max spans the full synthetic crystal",
+      "passed": true
+    }
+  ],
+  "overall_pass": true
+}

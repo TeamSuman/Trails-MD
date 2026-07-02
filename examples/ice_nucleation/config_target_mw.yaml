@@ -1,0 +1,50 @@
+# Phase 1 target-mode driving config (mW), per docs/ice_nucleation_cv_protocol.md.
+#
+# STATUS: ready-to-run once an mW-capable OpenMM `system_file` is supplied
+# (see README.md in this directory -- this is the one open engineering gap
+# blocking a live run; the CV itself (project_ice.py) is implemented and
+# validated against real IceCoder mW trajectory data, see
+# phase0_calibration.py / phase0_calibration_results.json).
+#
+# `target: [900, 0.0]` below drives toward a large hexagonal-ice nucleus
+# (n_max near the full 1024-molecule box, chi -> 0 selects Ih over Ic). Set
+# `target: [900, 1.0]` to instead select cubic ice.
+
+system:
+  conf_file: /home/user/IceCoder/data/seeded_mW_scaled.gro
+  top_file: /home/user/IceCoder/data/seeded_mW_scaled.gro
+  topology: amber
+  system_file: system_mw.py   # TODO: mW (Stillinger-Weber) OpenMM system builder -- not yet implemented, see README.md
+  project_file: project_ice.py
+  trajectory_topology_file: /home/user/IceCoder/data/seeded_mW_scaled.gro
+  feature_selection: "all"
+
+engine:
+  md_engine: openmm
+  platform_name: CPU           # switch to CUDA if available
+  precision: mixed
+  npt: false
+  temperature: 250.0            # supercooled, matches the seeded-mW reference (Phase 0)
+  dt: 0.010                     # mW's coarse-grained potential supports longer timesteps than all-atom water
+
+spawning:
+  spawn_scheme: density
+  spawn_type: probabilistic
+  search_mode: target            # bias spawning toward `target`
+  target: [900, 0.0]             # [n_max, chi] -- large hexagonal nucleus
+  walker: 10
+  step: 2000
+  stride: 20
+  max_workers: 1
+
+space_mode: fixed
+n_bins: [30, 30]
+min_values: [0, 0]
+max_values: [1024, 1]
+
+outdir: runs/ice_nucleation_mw_target
+random_seed: 7
+checkpoint_freq: 1
+save_features: false
+retrain_freq: 0
+aggregate_memory: false

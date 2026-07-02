@@ -1,0 +1,14 @@
+# Additional dependencies for the ice-nucleation CV example, layered on top
+# of the base Trails-MD environment (../../env.yml). Install into the same
+# environment:
+#   conda env update -n trails-md -f examples/ice_nucleation/env-ice.yml
+name: trails-md
+channels:
+  - conda-forge
+dependencies:
+  - freud>=3.0        # Steinhardt spherical harmonics, neighbor lists, clustering
+  - pyscal3            # optional cross-check / alternative solid-liquid & cluster routines
+  - ase                # synthetic reference lattice construction (Phase 0 calibration)
+  - dscribe             # optional: SOAP environment-similarity refinement, reuses IceCoder's featurizer
+  - pip:
+      - joblib          # optional: load IceCoder's trained SVM as an independent polymorph-purity validator
