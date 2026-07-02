@@ -344,8 +344,18 @@ but production scientific claims should be made only after checking CV
 definitions, sampling bounds, lineage connectivity, and system-specific
 validation.
 
-## How to cite
+## License
+
+Trails-MD is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+It's free to use for research, academic, educational, and other noncommercial
+purposes; commercial use requires a separate license from the copyright
+holder. See the [`LICENSE`](LICENSE) file for the full terms.
+
+<!-- ## How to cite
 
 If you use Trails-MD in your research, please cite it. Citation metadata is in
 [`CITATION.cff`](CITATION.cff) (GitHub renders a "Cite this repository" button
 from it). A DOI and the accompanying publication will be added on release.
+
+Unhide this section once the accompanying paper is published. -->
+
