@@ -1,0 +1,23 @@
+# Exact pip-installed versions validated in the development sandbox for the
+# ice-nucleation CV work (Phase 0 calibration + Phase 1 CV artifact). Layer
+# on top of Trails-MD's base environment (../../env.yml / pyproject.toml).
+#
+#   pip install -r examples/ice_nucleation/requirements-ice.txt
+#
+# These are pins from a *working, validated* environment, not minimum
+# version requirements -- feel free to relax them, but if something behaves
+# differently, reproducing this exact set is the fastest way to rule out an
+# environment difference.
+
+freud-analysis==3.4.0
+pyscal3==3.3.2
+ase==3.29.0
+dscribe==2.1.2
+MDAnalysis==2.10.0
+numpy==2.4.6
+scipy==1.17.1
+scikit-learn==1.9.0
+joblib==1.5.3
+matplotlib==3.11.0
+pydantic==2.13.4
+PyYAML==6.0.1

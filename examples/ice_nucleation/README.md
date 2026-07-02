@@ -16,6 +16,8 @@ CHILL+ cubicity `n_Ic / (n_Ic + n_Ih)` (polymorph selectivity).
 | `phase0_calibration_results.json` | Output of the calibration run (checked in for reference). |
 | `config_target_mw.yaml` | Phase 1 target-mode Trails-MD config template (mW, `space_mode: fixed`). |
 | `env-ice.yml` | Extra conda dependencies (freud, pyscal3, ase, dscribe) beyond the base `../../env.yml`. |
+| `requirements-ice.txt` | Exact pip-pinned versions validated in the development sandbox. |
+| [`MIGRATION.md`](MIGRATION.md) | Runbook for continuing this work on a local workstation (clone/env setup, verification, and a detailed next-steps task list -- start here if picking this up fresh). |
 
 ## What has been executed and validated
 
