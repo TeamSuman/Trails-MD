@@ -15,11 +15,19 @@ fixed CV (n_max, chi) cleanly separates three reference ensembles:
                                independently-sourced/guessed lattice constant
 
 Run: python3 phase0_calibration.py
+
+By default this looks for a sibling IceCoder checkout two directories above
+this repo (i.e. ``<workdir>/IceCoder`` next to ``<workdir>/Trails-MD``, the
+layout MIGRATION.md recommends). Override with the ICECODER_DATA_DIR
+environment variable if you cloned IceCoder somewhere else:
+
+    ICECODER_DATA_DIR=/path/to/IceCoder/data python3 phase0_calibration.py
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -28,9 +36,19 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ice_descriptors as ic  # noqa: E402
 
-ICECODER_DATA = Path("/home/user/IceCoder/data")
+_THIS_DIR = Path(__file__).resolve().parent
+_DEFAULT_ICECODER_DATA = _THIS_DIR.parent.parent.parent / "IceCoder" / "data"
+ICECODER_DATA = Path(os.environ.get("ICECODER_DATA_DIR", _DEFAULT_ICECODER_DATA))
 GRO = ICECODER_DATA / "seeded_mW_scaled.gro"
 DCD = ICECODER_DATA / "simulation_mW_long_scaled.dcd"
+
+if not GRO.exists() or not DCD.exists():
+    raise FileNotFoundError(
+        f"Could not find IceCoder's mW reference data under {ICECODER_DATA}. "
+        "Expected a sibling clone of https://github.com/TeamSuman/IceCoder "
+        "(see MIGRATION.md, Section 2), or set ICECODER_DATA_DIR to point "
+        "directly at its data/ directory."
+    )
 
 
 def liquid_reference(n_atoms: int, box_dimensions: np.ndarray, n_seeds: int = 3) -> list[dict]:

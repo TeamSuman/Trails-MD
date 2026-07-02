@@ -9,14 +9,22 @@
 # `target: [900, 0.0]` below drives toward a large hexagonal-ice nucleus
 # (n_max near the full 1024-molecule box, chi -> 0 selects Ih over Ic). Set
 # `target: [900, 1.0]` to instead select cubic ice.
+#
+# Paths below are relative to Trails-MD's CWD resolution convention (see
+# examples/AIB9/*.yaml, which use bare filenames and are meant to be run
+# from inside their own example directory) and assume the sibling-clone
+# layout from MIGRATION.md: `trails-md --config config_target_mw.yaml` run
+# from *inside* examples/ice_nucleation/, with IceCoder cloned as a sibling
+# of Trails-MD three directories up. If your layout differs, replace these
+# three paths with absolute paths to your IceCoder clone.
 
 system:
-  conf_file: /home/user/IceCoder/data/seeded_mW_scaled.gro
-  top_file: /home/user/IceCoder/data/seeded_mW_scaled.gro
+  conf_file: ../../../IceCoder/data/seeded_mW_scaled.gro
+  top_file: ../../../IceCoder/data/seeded_mW_scaled.gro
   topology: amber
   system_file: system_mw.py   # TODO: mW (Stillinger-Weber) OpenMM system builder -- not yet implemented, see README.md
   project_file: project_ice.py
-  trajectory_topology_file: /home/user/IceCoder/data/seeded_mW_scaled.gro
+  trajectory_topology_file: ../../../IceCoder/data/seeded_mW_scaled.gro
   feature_selection: "all"
 
 engine:
