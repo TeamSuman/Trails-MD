@@ -42,6 +42,8 @@ class EngineConfig(BaseModel):
     amber_input_file: str | None = None
     amber_extra_args: list[str] = []
     amber_trajectory_format: str = "auto"
+    seed: int | None = None
+
 
     @field_validator("gpu_ids")
     @classmethod

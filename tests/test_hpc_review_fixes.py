@@ -339,3 +339,38 @@ def test_amber_default_input_sets_tempi(tmp_path):
     text = out.read_text()
     assert "tempi=310.00" in text  # velocities generated at the target T, not 0 K
     assert "temp0=310.00" in text
+
+
+def test_engine_seeding(tmp_path):
+    from trails_md.engines.amber import AmberEngine
+    from trails_md.engines.gromacs import GromacsEngine
+
+    gmx = GromacsEngine(temperature=300.0, seed=12345)
+    gmx_out = tmp_path / "gromacs.mdp"
+    gmx._write_mdp(str(gmx_out), steps=100, stride=10)
+    assert "gen_seed                = 12345" in gmx_out.read_text()
+
+    amber = AmberEngine(temperature=300.0, seed=54321)
+    amber_out = tmp_path / "amber.in"
+    amber._write_input(str(amber_out), steps=100, stride=10, trajectory_format="netcdf")
+    assert "ig=54321," in amber_out.read_text()
+
+
+def test_per_walker_task_seeding(tmp_path):
+    from trails_md.execution.base import build_walker_tasks
+
+    tasks = build_walker_tasks(
+        engine_name="openmm",
+        engine_kwargs={"seed": 42},
+        prepare_kwargs={},
+        steps=100,
+        stride=10,
+        outdir=tmp_path,
+        iteration=2,
+        walkers=["coord1.pdb", "coord2.pdb", "coord3.pdb"],
+    )
+    seeds = [t.engine_kwargs.get("seed") for t in tasks]
+    assert len(seeds) == 3
+    assert len(set(seeds)) == 3  # all unique
+    assert all(isinstance(s, int) and s > 0 for s in seeds)
+

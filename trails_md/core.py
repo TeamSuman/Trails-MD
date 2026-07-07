@@ -391,6 +391,8 @@ class TrailsMDCore:
         engine_kwargs = {
             k: v for k, v in self.config.engine.model_dump().items() if k != "md_engine"
         }
+        if engine_kwargs.get("seed") is None:
+            engine_kwargs["seed"] = self.config.random_seed
         prepare_kwargs = {
             "conf": Path(self.config.system.conf_file),
             "top": Path(self.config.system.top_file),

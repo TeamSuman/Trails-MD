@@ -77,11 +77,18 @@ def build_walker_tasks(
     tasks: list[WalkerTask] = []
     for idx, coords in enumerate(walkers):
         traj_out = outdir / f"iteration_{iteration}_{idx}.{suffix}"
+        task_engine_kwargs = dict(engine_kwargs)
+        base_seed = task_engine_kwargs.get("seed")
+        if base_seed is not None:
+            walker_seed = (int(base_seed) + int(iteration) * 100003 + int(idx) * 1009) % 2147483647
+            if walker_seed == 0:
+                walker_seed = 1
+            task_engine_kwargs["seed"] = walker_seed
         tasks.append(
             WalkerTask(
                 index=idx,
                 engine_name=engine_name,
-                engine_kwargs=engine_kwargs,
+                engine_kwargs=task_engine_kwargs,
                 prepare_kwargs=prepare_kwargs,
                 steps=steps,
                 stride=stride,
@@ -102,6 +109,12 @@ def run_walker_task(task: WalkerTask) -> bool:
     warnings.filterwarnings("ignore", message="Reload offsets from trajectory")
 
     from trails_md.engines.base import EngineFactory
+
+    walker_seed = task.engine_kwargs.get("seed")
+    if walker_seed is not None:
+        from trails_md.utils.seeds import SeedManager
+
+        SeedManager(int(walker_seed)).set_seed()
 
     engine = EngineFactory.get(task.engine_name, **task.engine_kwargs)
     engine.prepare(**task.prepare_kwargs)

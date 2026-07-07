@@ -91,6 +91,7 @@ class GromacsEngine(MDEngine):
         self.gromacs_mdrun_ntomp = gromacs_mdrun_ntomp
         self.gromacs_mdrun_extra_args = list(gromacs_mdrun_extra_args or [])
         self.gromacs_grompp_maxwarn = int(gromacs_grompp_maxwarn)
+        self.seed: int | None = kwargs.get("seed", None)
 
         # Set after prepare()
         self.topology_file: Path | None = None
@@ -452,7 +453,7 @@ class GromacsEngine(MDEngine):
                 f"; Velocity generation — always regenerate for spawned frames\n"
                 f"gen_vel                 = yes\n"
                 f"gen_temp                = {self.temperature:.2f}\n"
-                f"gen_seed                = -1\n"
+                f"gen_seed                = {-1 if self.seed is None else self.seed}\n"
             )
 
         Path(filepath).write_text(content)

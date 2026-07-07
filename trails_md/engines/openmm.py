@@ -33,6 +33,7 @@ class OpenMMEngine(MDEngine):
         self.npt = npt
         self.should_equilibrate = equilibrate
         self.gromacs_include_dir = gromacs_include_dir
+        self.seed: int | None = kwargs.get("seed", None)
 
         self.simulation = None
         self.positions = None
@@ -147,13 +148,16 @@ class OpenMMEngine(MDEngine):
             self.integrator = LangevinMiddleIntegrator(
                 self.temperature, self.friction, self.dt
             )
+            if self.seed is not None:
+                self.integrator.setRandomNumberSeed(self.seed)
 
         if self.npt:
-            self.system.addForce(
-                MonteCarloBarostat(
-                    self.pressure, self.temperature, self.barostatInterval
-                )
+            barostat = MonteCarloBarostat(
+                self.pressure, self.temperature, self.barostatInterval
             )
+            if self.seed is not None:
+                barostat.setRandomNumberSeed(self.seed)
+            self.system.addForce(barostat)
 
         self.integrator.setConstraintTolerance(self.constraintTolerance)
 
@@ -232,7 +236,9 @@ class OpenMMEngine(MDEngine):
             if start_box_vectors is not None:
                 self.simulation.context.setPeriodicBoxVectors(*start_box_vectors)
             self.simulation.context.setPositions(start_positions)
-            self.simulation.context.setVelocitiesToTemperature(self.temperature)
+            self.simulation.context.setVelocitiesToTemperature(
+                self.temperature, self.seed if self.seed is not None else 0
+            )
 
         self.simulation.reporters = [self._trajectory_reporter(traj_out_str, stride)]
 
@@ -253,11 +259,15 @@ class OpenMMEngine(MDEngine):
             if start_box_vectors is not None:
                 self.simulation.context.setPeriodicBoxVectors(*start_box_vectors)
             self.simulation.context.setPositions(recovery_positions)
-            self.simulation.context.setVelocitiesToTemperature(self.temperature)
+            self.simulation.context.setVelocitiesToTemperature(
+                self.temperature, self.seed if self.seed is not None else 0
+            )
 
             self.simulation.minimizeEnergy()
             if self.should_equilibrate:
-                self.simulation.context.setVelocitiesToTemperature(self.temperature)
+                self.simulation.context.setVelocitiesToTemperature(
+                    self.temperature, self.seed if self.seed is not None else 0
+                )
                 self.simulation.step(self.equilibrationSteps)
 
             self.simulation.reporters = [
