@@ -23,7 +23,7 @@ from trails_md.engines.amber import amber_trajectory_suffix
 from trails_md.engines.base import EngineFactory
 from trails_md.paths import build_frame_records, map_global_frame
 from trails_md.reporting import IterationReporter
-from trails_md.spaces import AdaptiveSpaceModel, FeatureExtractor
+from trails_md.spaces import FeatureExtractor
 from trails_md.spaces.registry import is_adaptive_space
 from trails_md.spawners.base import SpawnerFactory
 from trails_md.utils.seeds import SeedManager
@@ -218,6 +218,8 @@ class TrailsMDCore:
         """Restore sampler state from a saved checkpoint and resume at the next iteration."""
         restored_model = self.space_model
         if restored_model is None and is_adaptive_space(self.config.space_mode):
+            from trails_md.spaces import AdaptiveSpaceModel
+
             restored_model = AdaptiveSpaceModel(**self._adaptive_model_kwargs())
 
         (
@@ -499,6 +501,8 @@ class TrailsMDCore:
 
             if do_retrain:
                 if self.space_model is None:
+                    from trails_md.spaces import AdaptiveSpaceModel
+
                     logging.info(f"Training new {self.config.space_mode} model...")
                     self.space_model = AdaptiveSpaceModel(
                         **self._adaptive_model_kwargs()
