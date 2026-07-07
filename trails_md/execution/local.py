@@ -125,17 +125,17 @@ class LocalProcessBackend(ExecutionBackend):
 
         ctx = mp.get_context("spawn")
         results = [False] * len(tasks)
-        task_iter = iter(tasks)
+        task_iter = iter(enumerate(tasks))
         timeout = self.walker_timeout
 
         def submit(executor, device_index: int):
             try:
-                task = next(task_iter)
+                pos, task = next(task_iter)
             except StopIteration:
                 return None
             future = executor.submit(_run_one, task, device_index)
-            # value = (index, device, start_time)
-            return future, (task.index, device_index, time.monotonic())
+            # value = (pos, task.index, device, start_time)
+            return future, (pos, task.index, device_index, time.monotonic())
 
         with ProcessPoolExecutor(max_workers=len(slots), mp_context=ctx) as executor:
             active: dict = {}
@@ -151,9 +151,9 @@ class LocalProcessBackend(ExecutionBackend):
                 poll = None if timeout is None else max(min(timeout, 30.0), 0.05)
                 done, _ = wait(active, timeout=poll, return_when=FIRST_COMPLETED)
                 for future in done:
-                    idx, freed_device, _ = active.pop(future)
+                    pos, idx, freed_device, _ = active.pop(future)
                     try:
-                        results[idx] = future.result()
+                        results[pos] = future.result()
                     except Exception:  # noqa: BLE001 - e.g. a killed worker process
                         import logging
 
@@ -162,7 +162,7 @@ class LocalProcessBackend(ExecutionBackend):
                             "marking it unsuccessful.",
                             idx,
                         )
-                        results[idx] = False
+                        results[pos] = False
                     submitted = submit(executor, freed_device)
                     if submitted is not None:
                         next_future, meta = submitted
@@ -170,16 +170,16 @@ class LocalProcessBackend(ExecutionBackend):
 
                 if timeout is not None and active:
                     now = time.monotonic()
-                    overdue = [m for m in active.values() if now - m[2] > timeout]
+                    overdue = [m for m in active.values() if now - m[3] > timeout]
                     if overdue:
                         import logging
 
-                        for idx, _dev, _start in active.values():
-                            results[idx] = False
+                        for pos, _idx, _dev, _start in active.values():
+                            results[pos] = False
                         logging.error(
                             "Walker(s) %s exceeded walker_timeout=%ss; terminating "
                             "the batch and marking remaining walkers unsuccessful.",
-                            sorted(m[0] for m in overdue),
+                            sorted(m[1] for m in overdue),
                             timeout,
                         )
                         _terminate_workers(executor)

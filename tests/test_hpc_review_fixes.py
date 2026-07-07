@@ -134,8 +134,10 @@ def test_parse_walltime_seconds():
     assert parse_walltime_seconds("01:00:00") == 3600
     assert parse_walltime_seconds("02:30:00") == 2 * 3600 + 30 * 60
     assert parse_walltime_seconds("30:00") == 30 * 60  # MM:SS
+    assert parse_walltime_seconds("60") == 60 * 60  # bare integer is minutes in SLURM
     assert parse_walltime_seconds("1-00:00:00") == 86400  # SLURM D-HH:MM:SS
     assert parse_walltime_seconds("nonsense") is None
+
 
 
 def test_scheduler_cancels_and_returns_on_wait_timeout():

@@ -44,11 +44,11 @@ Remaining **[OPEN]** items are catalogued below with concrete fixes.
 | 1.5 | High | No array chunking: >`MaxArraySize` (SLURM 1001) / PBS `max_array_size` walkers/iteration is rejected outright. | **[FIXED]** `execution.max_array_size` splits a batch into ≤-limit sub-arrays (submitted/waited sequentially) + regression test. |
 | 1.6 | Med | No concurrency cap → a huge array floods the scheduler and triggers a stat-storm each poll. | **[FIXED]** `max_in_flight` → `--array=0-N%M`. |
 | 1.7 | Med | 2 s grace after job exit is too short for NFS/Lustre marker lag → successful walkers misreported failed. | **[FIXED]** configurable `marker_grace` (default 30 s) with re-checks. |
-| 1.8 | Med | PBS backend is OpenPBS/PBS-Pro-only (`-J`, `PBS_ARRAY_INDEX`) but was documented as Torque-compatible. | **[FIXED docs]** clarified; Torque (`-t`/`PBS_ARRAYID`) variant is **[OPEN]**. |
-| 1.9 | Med | PBS does not export the submit env by default and no `#PBS -V` is emitted → bare `pmemd`/`gmx` not found. | **[FIXED docs]** call out `module_loads` / `#PBS -V`; auto-`-V` is **[OPEN]**. |
+| 1.8 | Med | PBS backend is OpenPBS/PBS-Pro-only (`-J`, `PBS_ARRAY_INDEX`) but was documented as Torque-compatible. | **[FIXED]** added `TorqueBackend` registered as `torque` (`-t`, `PBS_ARRAYID`). |
+| 1.9 | Med | PBS does not export the submit env by default and no `#PBS -V` is emitted → bare `pmemd`/`gmx` not found. | **[FIXED]** `#PBS -V` emitted by default in PBS and Torque backends. |
 | 1.10 | Med | Manifest split on a single space breaks on `outdir` paths containing spaces. `scheduler.py:_render_script`. | **[FIXED]** tab-delimited manifest + `cut -f` (default TAB) + test. |
 | 1.11 | Low | Empty/garbage job id after submit went undetected. | **[FIXED]** submit now requires a parseable job id. |
-| 1.12 | Low | Local backend indexes results by `task.index` assuming contiguous 0..n-1. `local.py`. | **[OPEN]** map by position/dict (latent; safe today). |
+| 1.12 | Low | Local backend indexes results by `task.index` assuming contiguous 0..n-1. `local.py`. | **[FIXED]** results mapped by positional enumerate index in `execute()`. |
 
 Architecture note: for very large, sustained fan-out the array-per-iteration
 model is fundamentally overhead-bound and ceiling-bound; see
@@ -66,7 +66,7 @@ roadmap.
 | 2.3 | High (silent physics) | GROMACS writes a t=0 frame → `step//stride + 1` frames/walker vs `step//stride` for OpenMM/Amber, desyncing the fixed-frame MSM/CV segmentation. `gromacs.py`. | **[OPEN]** drop the t=0 frame or segment by actual per-trajectory counts (see §4.x). |
 | 2.4 | High (HPC crash) | OpenMM `DeviceIndex` used absolute GPU ids but OpenMM numbers relative to `CUDA_VISIBLE_DEVICES`; the fallback only caught `CUDA_ERROR_NO_DEVICE`, so a bad index re-raised and killed the iteration. `openmm.py`. | **[FIXED]** broadened fallback to CPU; scheduler binding via 1.4; local restricted-visibility documented. |
 | 2.5 | Med-High | `-AllowSmallBox` passed unconditionally on `pmemd.cuda` disables the too-small-box safety abort → silent min-image errors. `amber.py`. | **[OPEN]** gate behind an opt-in flag. |
-| 2.6 | Med | `random_seed` never propagated to integrators/thermostats/barostats/velocity generation (OpenMM `setRandomNumberSeed`/`setVelocitiesToTemperature(seed)`, GROMACS `gen_seed`, Amber `ig`). | **[OPEN]** thread the seed (+per-walker offset) for reproducible runs. |
+| 2.6 | Med | `random_seed` never propagated to integrators/thermostats/barostats/velocity generation (OpenMM `setRandomNumberSeed`/`setVelocitiesToTemperature(seed)`, GROMACS `gen_seed`, Amber `ig`). | **[FIXED]** `seed` threaded through `EngineConfig` and perturbed per-walker across OpenMM, GROMACS, and Amber. |
 | 2.7 | Med | OpenMM device isolation only for CUDA; OpenCL/HIP and CPU walkers not isolated → oversubscription. `openmm.py`. | **[OPEN]** set `OpenCLDeviceIndex`/`HipDeviceIndex`/CPU `Threads`. |
 | 2.8 | Med | GROMACS `grompp -maxwarn 5` silently masked real setup errors (net charge, name/count mismatch). | **[FIXED]** configurable `gromacs_grompp_maxwarn`, default `0`; grompp stderr surfaced. |
 | 2.9 | Med | Amber template `ioutfm`/`ntxo` injected via naive `split("/")` → breaks on `&end`/multi-namelist templates. `amber.py`. | **[OPEN]** parse the `&cntrl` block or require `{}` placeholders. |
