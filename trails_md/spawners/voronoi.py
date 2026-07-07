@@ -46,6 +46,7 @@ class VoronoiSpawner(DensitySpawner):
             target=self.target if self.mode == "target" else None,
             periodic=self.periodic,
             grid_size=self.grid_size,
+            seed=self.seed,
         )
         table = binner.fit(cumulative_points)
         occupied = table.occupied_indices
@@ -57,8 +58,8 @@ class VoronoiSpawner(DensitySpawner):
             if table.target_closeness is None:
                 raise ValueError("Target Voronoi sampling requires a target.")
             weights *= table.target_closeness[occupied]
-        rows = _weighted_choice(occupied, weights, top_n)
-        return _sample_frames(table, rows)
+        rows = _weighted_choice(occupied, weights, top_n, rng=self.rng)
+        return _sample_frames(table, rows, rng=self.rng)
 
 
 SpawnerFactory.register("voronoi", VoronoiSpawner)

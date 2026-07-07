@@ -22,8 +22,9 @@ class DensitySpawner(Spawner):
         probabilistic: bool = True,
         target: list[float] | None = None,
         recent_window: int = 5,
-        **_: Any,
+        **kwargs: Any,
     ):
+        super().__init__(**kwargs)
         self.n_bins = n_bins or [30, 30]
         self.min_values = min_values
         self.max_values = max_values
@@ -55,7 +56,7 @@ class DensitySpawner(Spawner):
         )
         if not self.probabilistic:
             self.recent_bins.append({table.ids[row] for row in selected_rows})
-        return _sample_frames(table, selected_rows)
+        return _sample_frames(table, selected_rows, rng=self.rng)
 
     def _probabilistic_rows(self, table: BinTable, top_n: int) -> np.ndarray:
         occupied = table.occupied_indices
@@ -67,7 +68,7 @@ class DensitySpawner(Spawner):
             if table.target_closeness is None:
                 raise ValueError("Target density sampling requires a target.")
             weights *= table.target_closeness
-        return _weighted_choice(occupied, weights[occupied], top_n)
+        return _weighted_choice(occupied, weights[occupied], top_n, rng=self.rng)
 
     def _hard_rows(self, table: BinTable, top_n: int) -> np.ndarray:
         occupied = table.occupied_indices
@@ -82,7 +83,7 @@ class DensitySpawner(Spawner):
                 rows = rows[np.argsort(table.target_closeness[rows])[::-1]]
             fresh = [row for row in rows if table.ids[int(row)] not in recent]
             stale = [row for row in rows if table.ids[int(row)] in recent]
-            ordered = list(np.random.permutation(fresh)) + list(np.random.permutation(stale))
+            ordered = list(self.rng.permutation(fresh)) + list(self.rng.permutation(stale))
             selected.extend(int(row) for row in ordered)
             if len(selected) >= top_n:
                 return np.asarray(selected[:top_n], dtype=int)
@@ -91,8 +92,9 @@ class DensitySpawner(Spawner):
         return np.tile(np.asarray(selected, dtype=int), repeats)[:top_n]
 
 
-def _sample_frames(table: BinTable, rows: np.ndarray) -> list[int]:
-    return [int(np.random.choice(table.populated_data[int(row)])) for row in rows]
+def _sample_frames(table: BinTable, rows: np.ndarray, rng: np.random.Generator | None = None) -> list[int]:
+    choice_fn = rng.choice if rng is not None else np.random.choice
+    return [int(choice_fn(table.populated_data[int(row)])) for row in rows]
 
 
 def _cumulative_points(points: np.ndarray, history: dict[int, Any] | None) -> np.ndarray:
@@ -119,7 +121,7 @@ def _historical_points(points: np.ndarray, history: dict[int, Any] | None) -> np
     return np.vstack(projections) if projections else np.empty((0, points.shape[1]), dtype=float)
 
 
-def _weighted_choice(rows: np.ndarray, weights: np.ndarray, top_n: int) -> np.ndarray:
+def _weighted_choice(rows: np.ndarray, weights: np.ndarray, top_n: int, rng: np.random.Generator | None = None) -> np.ndarray:
     weights = np.asarray(weights, dtype=float)
     weights = np.where(np.isfinite(weights), weights, 0.0)
     if weights.sum() <= 0:
@@ -130,7 +132,8 @@ def _weighted_choice(rows: np.ndarray, weights: np.ndarray, top_n: int) -> np.nd
     # (common in target mode, where target_closeness zeroes out most bins).
     n_nonzero = int(np.count_nonzero(weights))
     replace = len(rows) < top_n or n_nonzero < top_n
-    return np.random.choice(rows, size=top_n, replace=replace, p=weights).astype(int)
+    choice_fn = rng.choice if rng is not None else np.random.choice
+    return choice_fn(rows, size=top_n, replace=replace, p=weights).astype(int)
 
 
 SpawnerFactory.register("density", DensitySpawner)

@@ -855,6 +855,9 @@ class TrailsMDCore:
             "feature_selection_indices": self.feature_selection_indices,
             "selected_feature_type": self.selected_feature_type,
             "retrain_controller": self.retrain_controller.state_dict(),
+            "spawner": self.spawner.state_dict()
+            if hasattr(self.spawner, "state_dict")
+            else None,
             # RNG state so a resumed run reproduces an uninterrupted one's stream.
             "rng_state": capture_rng_state(),
         }
@@ -881,6 +884,8 @@ class TrailsMDCore:
         self.retrain_controller.load_state_dict(state.get("retrain_controller", {}))
         if self.msm_monitor is not None and state.get("msm_monitor"):
             self.msm_monitor.load_state_dict(state["msm_monitor"])
+        if state.get("spawner") is not None and hasattr(self.spawner, "load_state_dict"):
+            self.spawner.load_state_dict(state["spawner"])
         # Restore the RNG stream last so it overrides the base seed set in
         # __init__ — resumed spawn/training draws then match an uninterrupted run.
         if state.get("rng_state") is not None:

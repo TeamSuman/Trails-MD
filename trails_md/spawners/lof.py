@@ -19,8 +19,9 @@ class LOFSpawner(Spawner):
         n_neighbors: int = 20,
         mode: str = "explore",
         target: list | None = None,
-        **_,
+        **kwargs,
     ):
+        super().__init__(**kwargs)
         self.n_neighbors = n_neighbors
         self.mode = mode
         self.target = np.asarray(target, dtype=float) if target is not None else None
@@ -65,7 +66,7 @@ class LOFSpawner(Spawner):
         n_nonzero = int(np.count_nonzero(weights))
         replace = n_cumulative < top_n or n_nonzero < top_n
         return (
-            np.random.choice(
+            self.rng.choice(
                 np.arange(n_cumulative), size=top_n, replace=replace, p=weights
             )
             .astype(int)

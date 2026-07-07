@@ -32,13 +32,13 @@ class WESpawner(Spawner):
         max_values: list[float] | None = None,
         target_per_bin: int = 4,
         seed: int = 42,
-        **_: Any,
+        **kwargs: Any,
     ):
+        super().__init__(seed=seed, **kwargs)
         self.n_bins = n_bins or [30, 30]
         self.min_values = min_values
         self.max_values = max_values
         self.we = WeightedEnsemble(target_per_bin=target_per_bin)
-        self.seed = int(seed)
         self.weights: np.ndarray | None = None  # aligned to cumulative cloud
         # Optional landscape-adaptive binner (set by the orchestrator); None -> grid.
         self.binner = None
@@ -57,8 +57,7 @@ class WESpawner(Spawner):
         weights = self._extend_weights(n)
 
         labels = self._bin_labels(cumulative)
-        rng = np.random.default_rng(self.seed)
-        result = self.we.resample(weights, labels, rng=rng)
+        result = self.we.resample(weights, labels, rng=self.rng)
 
         # Carry weights forward: aggregate resampled weight onto parent frames.
         new_weights = np.zeros(n, dtype=float)
@@ -67,7 +66,7 @@ class WESpawner(Spawner):
         total = new_weights.sum()
         self.weights = new_weights / total if total > 0 else None
 
-        return self._draw(result, top_n, rng)
+        return self._draw(result, top_n, self.rng)
 
     def _extend_weights(self, n: int) -> np.ndarray:
         if self.weights is None or len(self.weights) == 0:
@@ -109,11 +108,15 @@ class WESpawner(Spawner):
         return [int(i) for i in chosen]
 
     def state_dict(self) -> dict:
-        return {"weights": None if self.weights is None else self.weights.tolist()}
+        state = super().state_dict()
+        state["weights"] = None if self.weights is None else self.weights.tolist()
+        return state
 
     def load_state_dict(self, state: dict) -> None:
+        super().load_state_dict(state)
         if state and state.get("weights") is not None:
             self.weights = np.asarray(state["weights"], dtype=float)
+
 
 
 SpawnerFactory.register("we", WESpawner)

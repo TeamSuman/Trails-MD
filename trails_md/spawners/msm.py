@@ -59,8 +59,9 @@ class MSMSpawner(Spawner):
         leverage: int = 1,
         uncertainty: bool = True,
         seed: int = 42,
-        **_,
+        **kwargs,
     ):
+        super().__init__(seed=seed, **kwargs)
         self.n_clusters = int(n_clusters)
         self.mode = mode
         self.target = np.asarray(target, dtype=float) if target is not None else None
@@ -68,7 +69,6 @@ class MSMSpawner(Spawner):
         self.alpha = float(alpha)
         self.leverage = int(leverage)
         self.uncertainty = bool(uncertainty)
-        self.seed = int(seed)
         # Set by the orchestrator each iteration (previous iteration's MSM and the
         # estimator's clustering); None → least-counts fallback.
         self.msm_result = None
@@ -85,7 +85,6 @@ class MSMSpawner(Spawner):
         if len(cumulative) == 1:
             return [0 for _ in range(top_n)]
 
-        rng = np.random.default_rng(self.seed)
         frame_weights = self._msm_guided_weights(cumulative)
         if frame_weights is None:
             frame_weights = self._least_counts_weights(cumulative)
@@ -104,7 +103,7 @@ class MSMSpawner(Spawner):
         n_nonzero = int(np.count_nonzero(frame_weights))
         replace = n_cumulative < top_n or n_nonzero < top_n
         return (
-            rng.choice(
+            self.rng.choice(
                 np.arange(n_cumulative), size=top_n, replace=replace, p=frame_weights
             )
             .astype(int)
