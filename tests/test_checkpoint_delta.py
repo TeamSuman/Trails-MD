@@ -53,8 +53,12 @@ def test_delta_history_tolerates_corrupt_delta(tmp_path):
     # Simulate a crash-truncated earlier delta.
     (tmp_path / "iter_0" / "history.pkl").write_bytes(b"\x80\x04truncated")
 
-    _, _, _, full, _ = mgr.load(1)  # must not raise
-    assert 1 in full  # the newer, intact delta is still recovered
+    with pytest.raises(RuntimeError):
+        mgr.load(1)  # must raise by default to prevent torn history hazard
+
+    _, _, _, full, _ = mgr.load(1, ignore_missing_history=True)
+    assert 1 in full  # the newer, intact delta is still recovered with override
+
 
 
 def test_checkpoint_writes_are_atomic(tmp_path):

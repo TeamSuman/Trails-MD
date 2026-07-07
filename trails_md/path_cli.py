@@ -71,6 +71,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         help="Checkpoint iteration to read. Defaults to the latest checkpoint.",
     )
+    parser.add_argument(
+        "--ignore-missing-history",
+        action="store_true",
+        help="Ignore missing or unreadable history deltas when reconstructing history.",
+    )
     raw_argv = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(_normalize_negative_cv_args(raw_argv))
     _validate_args(parser, args)
@@ -124,7 +129,11 @@ def _normalize_negative_cv_args(argv: Sequence[str] | None) -> Sequence[str] | N
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
-    history = load_history(args.run_dir, checkpoint=args.checkpoint)
+    history = load_history(
+        args.run_dir,
+        checkpoint=args.checkpoint,
+        ignore_missing=args.ignore_missing_history,
+    )
     records = history_records(history)
 
     if args.pairs_file is not None:

@@ -210,6 +210,7 @@ def test_walker_task_device_index_defaults_to_scheduler_sentinel():
 # ── Checkpoint completeness gating ──────────────────────────────────────────
 def test_broken_delta_chain_is_reported_loudly(tmp_path, caplog):
     import logging
+    import pytest
 
     from trails_md.checkpoints.manager import CheckpointManager
 
@@ -220,8 +221,11 @@ def test_broken_delta_chain_is_reported_loudly(tmp_path, caplog):
     # Simulate an operator pruning a middle checkpoint's delta after the fact.
     (tmp_path / "iter_1" / "history.pkl").unlink()
 
+    with pytest.raises(RuntimeError):
+        mgr.load(2)  # must raise by default when chain is broken
+
     with caplog.at_level(logging.ERROR):
-        _, _, _, full, _ = mgr.load(2)  # must not raise
+        _, _, _, full, _ = mgr.load(2, ignore_missing_history=True)
     assert any("chain is broken" in r.message for r in caplog.records)
     assert 1 not in full  # the lost delta's key is genuinely absent (now flagged)
 

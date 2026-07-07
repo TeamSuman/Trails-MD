@@ -125,7 +125,9 @@ def map_global_frame(records: list[dict[str, Any]], index: int) -> dict[str, Any
     return records[index]
 
 
-def load_history(run_dir: Path, checkpoint: int | None = None) -> dict[int, Any]:
+def load_history(
+    run_dir: Path, checkpoint: int | None = None, ignore_missing: bool = False
+) -> dict[int, Any]:
     from trails_md.checkpoints.manager import reconstruct_history
 
     checkpoint_root = run_dir / "checkpoints"
@@ -148,7 +150,7 @@ def load_history(run_dir: Path, checkpoint: int | None = None) -> dict[int, Any]
     # History is delta-checkpointed: each iter_*/history.pkl holds only the
     # entries since the previous checkpoint. Merge them back into the full
     # history (otherwise the lineage/path tools see only the last window).
-    return reconstruct_history(checkpoint_root, target)
+    return reconstruct_history(checkpoint_root, target, ignore_missing=ignore_missing)
 
 
 def history_records(history: dict[int, Any]) -> list[FrameRef]:

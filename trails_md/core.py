@@ -214,7 +214,7 @@ class TrailsMDCore:
         kwargs["seed"] = self.config.random_seed  # reproducible CV training
         return kwargs
 
-    def restore_checkpoint(self, iteration: int):
+    def restore_checkpoint(self, iteration: int, ignore_missing_history: bool = False):
         """Restore sampler state from a saved checkpoint and resume at the next iteration."""
         restored_model = self.space_model
         if restored_model is None and is_adaptive_space(self.config.space_mode):
@@ -232,6 +232,7 @@ class TrailsMDCore:
             self.checkpoint_manager.load(
                 iteration=iteration,
                 space_model=restored_model,
+                ignore_missing_history=ignore_missing_history,
             )
         )
         if self.space_model is not None:

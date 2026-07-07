@@ -61,6 +61,7 @@ def run(
     config: dict[str, Any],
     iterations: int,
     resume: str | int | None = None,
+    ignore_missing_history: bool = False,
 ) -> tuple[Path, int]:
     from trails_md.core import TrailsMDCore
 
@@ -74,7 +75,10 @@ def run(
             if resume == "latest"
             else int(resume)
         )
-        sampler.restore_checkpoint(checkpoint_iteration)
+        sampler.restore_checkpoint(
+            checkpoint_iteration,
+            ignore_missing_history=ignore_missing_history,
+        )
         walkers = sampler.resume_walkers()
         print(
             "Resumed from checkpoint "
@@ -127,6 +131,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--ignore-missing-history",
+        action="store_true",
+        help="Ignore missing or unreadable history deltas when restoring a checkpoint.",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Validate inputs and executables, then exit before running MD.",
@@ -173,6 +182,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             config,
             args.iterations,
             resume=args.resume,
+            ignore_missing_history=args.ignore_missing_history,
         )
     except (FileNotFoundError, ImportError, RuntimeError, ValueError) as exc:
         raise SystemExit(f"ERROR: {exc}") from None
