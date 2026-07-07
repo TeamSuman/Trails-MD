@@ -4,11 +4,19 @@ import pickle
 from pathlib import Path
 from typing import Any
 
-import torch
+# NOTE: ``torch`` is imported lazily inside the methods that need it so that
+# checkpoint bookkeeping (scanning for the resume target, reconstructing the
+# delta history) works in a light environment without torch — e.g. a CPU-only
+# login node running ``trails-md-path`` — and only the neural-CV save/load paths
+# pull it in.
 
 # On-disk checkpoint format version. Bump when the layout changes; ``load``
 # tolerates older checkpoints (a missing version file is treated as v1).
 CHECKPOINT_FORMAT_VERSION = 2
+
+# Marker file written last by ``save``; its presence is the sole signal that a
+# checkpoint directory is complete and safe to resume from.
+_COMPLETION_MARKER = "format_version"
 
 # CV methods whose projection network lives in ``space_model.fitted`` as a
 # torch module and is additionally snapshotted as ``model.pt``.
@@ -16,16 +24,40 @@ _TORCH_ENCODER_MODES = ("tvae", "vampnet", "spib")
 
 
 def _atomic_pickle(obj: Any, path: Path) -> None:
-    """Pickle ``obj`` to ``path`` atomically (write tmp, then os.replace).
+    """Pickle ``obj`` to ``path`` atomically (write tmp, fsync, then os.replace).
 
     Prevents a crash mid-write (e.g. an HPC walltime kill) from leaving a
     truncated file — important for delta history, where every checkpoint's
-    ``history.pkl`` is needed to reconstruct the full history on resume.
+    ``history.pkl`` is needed to reconstruct the full history on resume. The
+    ``fsync`` before the rename means the bytes are durable even across a node
+    power-loss / networked-FS client failover, not just a process kill.
     """
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "wb") as handle:
         pickle.dump(obj, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(tmp, path)
+
+
+def _is_complete_checkpoint(iter_dir: Path) -> bool:
+    """A checkpoint dir is resumable only once its completion marker exists."""
+    return (iter_dir / _COMPLETION_MARKER).exists()
+
+
+def _iter_number(path: Path) -> int:
+    return int(path.name.removeprefix("iter_"))
+
+
+def _complete_checkpoint_iters(checkpoint_root: Path) -> list[int]:
+    """Iteration numbers of *complete* checkpoint directories, ascending."""
+    return sorted(
+        _iter_number(path)
+        for path in checkpoint_root.glob("iter_*")
+        if path.is_dir()
+        and path.name.removeprefix("iter_").isdigit()
+        and _is_complete_checkpoint(path)
+    )
 
 
 def reconstruct_history(checkpoint_root: Path, iteration: int) -> dict[Any, Any]:
@@ -33,16 +65,11 @@ def reconstruct_history(checkpoint_root: Path, iteration: int) -> dict[Any, Any]
     ``<= iteration``) into the full cumulative history.
 
     Each key normally lives in exactly one delta; on overlap the newer checkpoint
-    wins. Unreadable deltas (truncated by a crash) are skipped with a warning
-    rather than aborting the whole restore.
+    wins. Incomplete (torn) checkpoint directories and unreadable deltas
+    (truncated by a crash) are skipped with a warning rather than aborting the
+    whole restore.
     """
-    iters = sorted(
-        int(path.name.removeprefix("iter_"))
-        for path in checkpoint_root.glob("iter_*")
-        if path.is_dir()
-        and path.name.removeprefix("iter_").isdigit()
-        and int(path.name.removeprefix("iter_")) <= iteration
-    )
+    iters = [it for it in _complete_checkpoint_iters(checkpoint_root) if it <= iteration]
     full: dict[Any, Any] = {}
     for it in iters:
         hist_file = checkpoint_root / f"iter_{it}" / "history.pkl"
@@ -88,6 +115,8 @@ class CheckpointManager:
                 space_model.type in _TORCH_ENCODER_MODES
                 and getattr(space_model, "fitted", None) is not None
             ):
+                import torch
+
                 tmp = iter_dir / "model.pt.tmp"
                 torch.save(space_model.fitted.state_dict(), tmp)
                 os.replace(tmp, iter_dir / "model.pt")
@@ -130,6 +159,12 @@ class CheckpointManager:
             raise FileNotFoundError(
                 f"Checkpoint for iteration {iteration} not found at {iter_dir}"
             )
+        if not _is_complete_checkpoint(iter_dir):
+            raise FileNotFoundError(
+                f"Checkpoint {iter_dir} is incomplete (no '{_COMPLETION_MARKER}' "
+                "marker) — it was likely truncated by a crash mid-save. Resume "
+                "from an earlier complete checkpoint or remove this directory."
+            )
         self._check_format_version(iter_dir)
 
         # 1. Load model weights
@@ -138,11 +173,19 @@ class CheckpointManager:
                 space_model = pickle.load(f)
         elif hasattr(space_model, "type"):
             if space_model.type in _TORCH_ENCODER_MODES:
+                import torch
+
                 if not (iter_dir / "model.pt").exists():
                     raise FileNotFoundError(
                         f"{space_model.type} model checkpoint missing in {iter_dir}"
                     )
-                space_model.fitted.load_state_dict(torch.load(iter_dir / "model.pt"))
+                # map_location="cpu" so a GPU-trained checkpoint can be restored
+                # on a CPU-only node (analysis / login node) or one with a
+                # different GPU count; the module is moved back to its device by
+                # the caller if needed.
+                space_model.fitted.load_state_dict(
+                    torch.load(iter_dir / "model.pt", map_location="cpu")
+                )
                 space_model.fitted.eval()
             elif space_model.type == "tica":
                 if not (iter_dir / "model.pkl").exists():
@@ -190,26 +233,20 @@ class CheckpointManager:
             )
 
     def latest_iteration(self) -> int:
-        checkpoint_dirs = [
-            path
-            for path in self.checkpoint_dir.glob("iter_*")
-            if path.is_dir() and path.name.removeprefix("iter_").isdigit()
-        ]
-        if not checkpoint_dirs:
+        # Only *complete* checkpoints are resumable: an incomplete ``iter_N``
+        # (crash mid-save, missing the completion marker) must never be selected
+        # as the resume target, otherwise ``load`` reads torn/absent files.
+        complete = _complete_checkpoint_iters(self.checkpoint_dir)
+        if not complete:
             raise FileNotFoundError(
-                f"No checkpoints found under {self.checkpoint_dir}"
+                f"No complete checkpoints found under {self.checkpoint_dir}"
             )
-        return max(int(path.name.removeprefix("iter_")) for path in checkpoint_dirs)
+        return complete[-1]
 
     def _get_latest_checkpoint_before(self, iteration: int) -> int | float:
-        checkpoint_dirs = [
-            path
-            for path in self.checkpoint_dir.glob("iter_*")
-            if path.is_dir() and path.name.removeprefix("iter_").isdigit()
+        previous = [
+            it
+            for it in _complete_checkpoint_iters(self.checkpoint_dir)
+            if it < iteration
         ]
-        previous_iters = sorted([
-            int(path.name.removeprefix("iter_"))
-            for path in checkpoint_dirs
-            if int(path.name.removeprefix("iter_")) < iteration
-        ], reverse=True)
-        return previous_iters[0] if previous_iters else -float('inf')
+        return previous[-1] if previous else -float("inf")

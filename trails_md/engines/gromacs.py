@@ -31,7 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import MDEngine, md_subprocess_timeout
+from .base import MDEngine, box_vectors_to_abc_angles, md_subprocess_timeout
 
 
 class GromacsEngine(MDEngine):
@@ -73,6 +73,7 @@ class GromacsEngine(MDEngine):
         gromacs_mdrun_ntmpi: int = 1,
         gromacs_mdrun_ntomp: int | None = None,
         gromacs_mdrun_extra_args: list[str] | None = None,
+        gromacs_grompp_maxwarn: int = 0,
         **kwargs,  # absorb OpenMM / Amber specific kwargs
     ):
         self.temperature = temperature
@@ -89,6 +90,7 @@ class GromacsEngine(MDEngine):
         self.gromacs_mdrun_ntmpi = gromacs_mdrun_ntmpi
         self.gromacs_mdrun_ntomp = gromacs_mdrun_ntomp
         self.gromacs_mdrun_extra_args = list(gromacs_mdrun_extra_args or [])
+        self.gromacs_grompp_maxwarn = int(gromacs_grompp_maxwarn)
 
         # Set after prepare()
         self.topology_file: Path | None = None
@@ -210,7 +212,11 @@ class GromacsEngine(MDEngine):
 
         # ── Build subprocess environment ──────────────────────────────────
         env = os.environ.copy()
-        env["CUDA_VISIBLE_DEVICES"] = str(device_index)
+        # device_index >= 0 is a local-backend GPU slot to pin to. A negative
+        # sentinel means the scheduler already set CUDA_VISIBLE_DEVICES for this
+        # array task — inherit it instead of clobbering it to a single device.
+        if device_index >= 0:
+            env["CUDA_VISIBLE_DEVICES"] = str(device_index)
         if self.gromacs_include_dir:
             existing = env.get("GMXLIB", "")
             env["GMXLIB"] = (
@@ -232,11 +238,11 @@ class GromacsEngine(MDEngine):
             "-o",
             str(tpr_file),
             "-maxwarn",
-            "5",
+            str(self.gromacs_grompp_maxwarn),
         ]
 
         try:
-            subprocess.run(
+            grompp_proc = subprocess.run(
                 grompp_cmd,
                 env=env,
                 capture_output=True,
@@ -244,6 +250,14 @@ class GromacsEngine(MDEngine):
                 check=True,
                 timeout=md_subprocess_timeout(),
             )
+            # Surface grompp notes/warnings even on success so silently-tolerated
+            # warnings (up to gromacs_grompp_maxwarn) remain visible in the logs.
+            if grompp_proc.stderr and grompp_proc.stderr.strip():
+                logging.info(
+                    "GromacsEngine grompp run %d notes/warnings:\n%s",
+                    run_index,
+                    grompp_proc.stderr.strip(),
+                )
         except subprocess.CalledProcessError as exc:
             logging.error(
                 "GromacsEngine grompp run %d failed (exit %d):\n%s",
@@ -518,23 +532,11 @@ class GromacsEngine(MDEngine):
 
     @staticmethod
     def _openmm_box_to_angstrom(box_vectors) -> np.ndarray | None:
-        """Convert an OpenMM box-vectors tuple to ``[a, b, c, 90, 90, 90]`` in Angstroms.
-
-        Only orthogonal boxes are currently supported.
-        """
-        if box_vectors is None:
-            return None
+        """Convert an OpenMM box-vectors tuple to ``[a, b, c, α, β, γ]`` in
+        Angstroms/degrees, handling triclinic cells (see
+        :func:`trails_md.engines.base.box_vectors_to_abc_angles`)."""
         try:
-            from openmm.unit import is_quantity, nanometer  # type: ignore
-
-            bv = []
-            for vec in box_vectors:
-                if is_quantity(vec):
-                    vec = vec.value_in_unit(nanometer)
-                bv.append([float(vec[0]), float(vec[1]), float(vec[2])])
-            bv_ang = np.array(bv, dtype=np.float64) * 10.0  # nm → Å
-            a, b, c = bv_ang[0][0], bv_ang[1][1], bv_ang[2][2]
-            return np.array([a, b, c, 90.0, 90.0, 90.0], dtype=np.float64)
-        except (ImportError, TypeError, IndexError) as exc:
+            return box_vectors_to_abc_angles(box_vectors)
+        except (TypeError, IndexError) as exc:
             logging.warning("GromacsEngine: could not parse box vectors (%s).", exc)
             return None

@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+#PBS -N trails-hpc-cpu
+#PBS -l select=1:ncpus=2:mem=4gb
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#
+# Driver job: PBS (OpenPBS / PBS Pro), CPU-only queue. Runs the orchestrator,
+# which submits one array job per iteration for the walkers.
+#
+# EDIT the SITE SETUP block, then submit from the repo root:
+#     qsub hpc_tests/pbs/run_cpu.pbs
+set -uo pipefail
+
+# =========================== SITE SETUP (EDIT) ===============================
+# module load anaconda3
+# source "$(conda info --base)/etc/profile.d/conda.sh"
+# conda activate trails-md
+# Mirror these in the config's execution.module_loads. On PBS the submit
+# environment is NOT exported by default — either use module_loads or add
+# "#PBS -V" to execution.extra_directives so the walker jobs find trails-md.
+# =============================================================================
+
+REPO_ROOT="${PBS_O_WORKDIR:-$(pwd)}"
+cd "$REPO_ROOT"
+CONFIG="${CONFIG:-hpc_tests/configs/alad_cpu_pbs.yaml}"
+ITERATIONS="${ITERATIONS:-3}"
+WALKERS="${WALKERS:-8}"
+RESULTS="${RESULTS:-results/pbs_cpu}"
+mkdir -p "$RESULTS"
+
+echo "== [1/4] preflight =="
+python hpc_tests/checks/preflight.py --scheduler pbs --config "$CONFIG" \
+    --out "$RESULTS/preflight.json" || { echo "PREFLIGHT FAILED"; exit 1; }
+
+echo "== [2/4] trails-md --check =="
+trails-md --config "$CONFIG" --check || { echo "CHECK FAILED"; exit 1; }
+
+echo "== [3/4] run ($ITERATIONS iterations) =="
+trails-md --config "$CONFIG" --iterations "$ITERATIONS" --log-level INFO \
+    2>&1 | tee "$RESULTS/run.log"
+RUN_RC=${PIPESTATUS[0]}
+
+echo "== [4/4] validate =="
+OUTDIR=$(python - "$CONFIG" <<'PY'
+import sys, yaml
+from pathlib import Path
+cfg = yaml.safe_load(Path(sys.argv[1]).read_text())
+out = cfg.get("outdir", "runs/sampler_output")
+base = Path(sys.argv[1]).parent
+print(out if Path(out).is_absolute() else str((base / out).resolve()))
+PY
+)
+python hpc_tests/checks/validate_results.py --outdir "$OUTDIR" \
+    --expect-iterations "$ITERATIONS" --expect-walkers "$WALKERS" \
+    --engine openmm --out "$RESULTS/validate.json"
+VAL_RC=$?
+echo "SUMMARY: run_rc=$RUN_RC validate_rc=$VAL_RC results in $RESULTS/"
+exit $(( RUN_RC != 0 || VAL_RC != 0 ))

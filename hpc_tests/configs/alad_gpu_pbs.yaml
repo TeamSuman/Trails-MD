@@ -1,0 +1,62 @@
+# HPC test config — GPU queue, PBS (OpenPBS / PBS Pro) backend.
+#
+# Same small alanine-dipeptide workload on the OpenMM CUDA platform, dispatched
+# as a PBS array job requesting one GPU per element (`select=1:ncpus=..:ngpus=1`).
+# Validates GPU binding on PBS clusters. NOTE: some PBS sites do NOT isolate GPUs
+# per job via cgroups; if several array elements land on one node they may all
+# see every GPU. See hpc_tests/DEBUGGING.md CODE=GPU_BINDING.
+#
+# Validate first:  trails-md --config hpc_tests/configs/alad_gpu_pbs.yaml --check
+
+system:
+  conf_file: ../../examples/alanine_dipeptide/structure.pdb
+  top_file: ../../examples/alanine_dipeptide/structure.pdb
+  topology: amber
+  system_file: ../../examples/alanine_dipeptide/system.py
+  project_file: ../../examples/alanine_dipeptide/project_phi_psi.py
+  trajectory_topology_file: ../../examples/alanine_dipeptide/structure.pdb
+  feature_selection: "protein and not (type H)"
+
+engine:
+  md_engine: openmm
+  platform_name: CUDA
+  precision: mixed
+  temperature: 300.0
+  dt: 0.002
+  npt: false
+
+spawning:
+  spawn_scheme: density
+  spawn_type: hard
+  search_mode: explore
+  walker: 8
+  step: 5000
+  stride: 100
+  max_workers: 8
+
+execution:
+  backend: pbs
+  # ---- EDIT FOR YOUR SITE ----
+  partition: null              # PBS GPU queue name
+  account: null
+  walltime: "00:30:00"
+  cpus_per_task: 4
+  gpus_per_task: 1
+  memory: "8gb"
+  module_loads: []             # e.g. ["module load cuda/12.2", "module load anaconda3"]
+  extra_directives: []         # e.g. ["#PBS -V"] to export the submit environment
+  max_retries: 1
+  poll_interval: 15
+  marker_grace: 30
+  wait_timeout: null
+
+space_mode: fixed
+n_bins: [18, 18]
+min_values: [-3.141592653589793, -3.141592653589793]
+max_values: [3.141592653589793, 3.141592653589793]
+
+outdir: runs/hpc_alad_gpu_pbs
+random_seed: 42
+checkpoint_freq: 1
+min_success_fraction: 1.0
+save_features: false

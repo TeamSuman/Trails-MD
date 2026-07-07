@@ -2,7 +2,10 @@ import os
 import random
 
 import numpy as np
-import torch
+
+# torch is imported lazily inside set_seed so that constructing a SeedManager
+# (and importing lightweight utils) does not require torch on, e.g., a CPU-only
+# analysis/login node running the path/log CLIs.
 
 
 class SeedManager:
@@ -28,7 +31,12 @@ class SeedManager:
         # 2. NumPy backend
         np.random.seed(self.seed)
 
-        # 3. PyTorch (CPU & GPU)
+        # 3. PyTorch (CPU & GPU) — optional; skip cleanly if torch is absent.
+        try:
+            import torch
+        except ImportError:
+            return
+
         torch.manual_seed(self.seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(self.seed)

@@ -85,7 +85,13 @@ Where walkers run (workstation vs HPC). See [Execution](execution.md).
 | `cpus_per_task` / `gpus_per_task` / `memory` | `1` / `0` / `None` | Per-walker resources. |
 | `max_retries` | `1` | Resubmit failed walkers up to N times. |
 | `poll_interval` / `submit_timeout` | `30` / `60` | Polling / command timeouts (s). |
+| `max_in_flight` | `None` | Cap concurrent array elements (SLURM `%N`); set for large batches. |
+| `wait_timeout` | `None` | Ceiling (s) on waiting for one array job before cancel; `None` derives from `walltime`. |
+| `marker_grace` | `30` | Seconds to keep re-checking result markers after the job leaves the queue (shared-FS lag). |
 | `module_loads` / `extra_directives` | `[]` / `[]` | `module load` lines / raw scheduler directives. |
+
+See [Execution](execution.md) and [HPC scaling](hpc_scaling.md) for scaling and
+fault-tolerance guidance.
 
 ## Top-level
 
@@ -93,5 +99,13 @@ Where walkers run (workstation vs HPC). See [Execution](execution.md).
 | --- | --- | --- |
 | `outdir` | `runs/sampler_output` | Output directory. |
 | `random_seed` | `42` | Global seed. |
-| `checkpoint_freq` | `1` | Checkpoint every N iterations. |
+| `checkpoint_freq` | `1` | Checkpoint every N iterations. `0` disables checkpointing (logged loudly at startup). |
+| `min_success_fraction` | `1.0` | Fraction of walkers that must succeed to proceed; `< 1.0` tolerates transient failures (see [Execution](execution.md)). |
+| `adaptive_angle_encoding` | `raw` | `raw` or `sincos`. Use `sincos` for periodicity-safe dihedral (`phi_psi`) features — strongly recommended whenever an angle can cross ±π. |
 | `n_bins` / `min_values` / `max_values` | `[30,30]` / — / — | Binning for coverage / fixed-space bounds. |
+
+!!! tip "GROMACS grompp strictness"
+    `engine.gromacs_grompp_maxwarn` (default `0`, strict) controls how many
+    grompp warnings are tolerated. grompp warnings often flag real problems (net
+    charge, atom/molecule-name or coordinate/topology mismatches); raise it only
+    after vetting the warnings.

@@ -1,0 +1,60 @@
+# HPC test config — CPU-only queue, PBS (OpenPBS / PBS Pro) backend.
+#
+# Same tiny alanine-dipeptide workload as alad_cpu_slurm.yaml, dispatched as a
+# PBS array job (`#PBS -J 0-N`, `qsub`, `qstat`). NOTE: this backend targets
+# OpenPBS / PBS Pro (`-J`, PBS_ARRAY_INDEX). Classic Torque uses `-t` /
+# PBS_ARRAYID and is NOT supported — see hpc_tests/DEBUGGING.md CODE=PBS_FLAVOR.
+#
+# Validate first:  trails-md --config hpc_tests/configs/alad_cpu_pbs.yaml --check
+
+system:
+  conf_file: ../../examples/alanine_dipeptide/structure.pdb
+  top_file: ../../examples/alanine_dipeptide/structure.pdb
+  topology: amber
+  system_file: ../../examples/alanine_dipeptide/system.py
+  project_file: ../../examples/alanine_dipeptide/project_phi_psi.py
+  trajectory_topology_file: ../../examples/alanine_dipeptide/structure.pdb
+  feature_selection: "protein and not (type H)"
+
+engine:
+  md_engine: openmm
+  platform_name: CPU
+  temperature: 300.0
+  dt: 0.002
+  npt: false
+
+spawning:
+  spawn_scheme: density
+  spawn_type: hard
+  search_mode: explore
+  walker: 8
+  step: 1000
+  stride: 100
+  max_workers: 8
+
+execution:
+  backend: pbs
+  # ---- EDIT FOR YOUR SITE ----
+  partition: null              # PBS queue name, e.g. "cpuq"
+  account: null                # e.g. "PROJ1234"
+  walltime: "00:20:00"
+  cpus_per_task: 2
+  gpus_per_task: 0
+  memory: "4gb"                # PBS memory format (lower-case)
+  module_loads: []             # e.g. ["module load anaconda3"]
+  extra_directives: []         # e.g. ["#PBS -V"] to export the submit environment
+  max_retries: 1
+  poll_interval: 15
+  marker_grace: 30
+  wait_timeout: null
+
+space_mode: fixed
+n_bins: [18, 18]
+min_values: [-3.141592653589793, -3.141592653589793]
+max_values: [3.141592653589793, 3.141592653589793]
+
+outdir: runs/hpc_alad_cpu_pbs
+random_seed: 42
+checkpoint_freq: 1
+min_success_fraction: 1.0
+save_features: false
