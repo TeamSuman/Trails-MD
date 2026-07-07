@@ -318,6 +318,11 @@ class AdaptiveSpaceModel:
             tensor = torch.as_tensor(
                 self._torch_features(scaled), dtype=torch.float32, device=device
             )
+            # eval() so dropout / BatchNorm use inference behaviour; torch.no_grad
+            # only disables autograd, not train-mode stochasticity. Matches the
+            # tvae/vampnet/spib branches, which already call .eval().
+            if hasattr(self.model, "eval"):
+                self.model.eval()
             with torch.no_grad():
                 projected = self.model(tensor).detach().cpu().numpy()
         elif self.type == "pca":

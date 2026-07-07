@@ -84,13 +84,14 @@ def run(
         walkers = sampler.generate_initial_walkers()
 
     completed_iterations = 0
-    for iteration in range(iterations):
+    for _iteration in range(iterations):
+        # run_iteration is the single authority on whether an iteration has
+        # enough successful walkers to proceed: it raises when the success rate
+        # falls below config.min_success_fraction (1.0 = abort on any failure)
+        # and otherwise continues with the survivors.
         result = sampler.run_iteration(walkers)
         completed_iterations += 1
         walkers = result["walkers"]
-        if not all(result["success"]):
-            failed = result["success"].count(False)
-            raise RuntimeError(f"{failed} walker(s) failed at iteration {iteration}.")
         if result.get("converged"):
             print(f"Converged: {result.get('convergence_reason')}")
             break

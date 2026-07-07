@@ -34,6 +34,10 @@ class EngineConfig(BaseModel):
     gromacs_mdrun_ntmpi: int = 1
     gromacs_mdrun_ntomp: int | None = None
     gromacs_mdrun_extra_args: list[str] = []
+    # Max grompp warnings tolerated. Default 0 (strict): grompp warnings often
+    # flag real problems (net charge, atom/molecule-name or coordinate/topology
+    # mismatches). Raise deliberately only if you have vetted the warnings.
+    gromacs_grompp_maxwarn: int = 0
     amber_executable: str = "pmemd"
     amber_input_file: str | None = None
     amber_extra_args: list[str] = []
@@ -284,6 +288,22 @@ class ExecutionConfig(BaseModel):
     max_retries: int = 1  # resubmit failed walkers up to this many times
     poll_interval: float = 30.0  # seconds between scheduler polls
     submit_timeout: float = 60.0  # seconds for a submit/poll command
+    # Cap concurrently-running array elements (SLURM `--array=...%N`); None = no
+    # cap. Set this when submitting hundreds/thousands of walkers to respect
+    # site submit-rate / MaxArraySize policies.
+    max_in_flight: int | None = None
+    # Split a batch larger than this into multiple sub-arrays, so walkers-per-
+    # iteration can exceed the scheduler's array-size cap (SLURM MaxArraySize
+    # default 1001; PBS max_array_size). None = one array (legacy).
+    max_array_size: int | None = None
+    # Overall ceiling (seconds) on waiting for one iteration's array job before
+    # it is cancelled and unfinished walkers are marked failed. None derives a
+    # generous bound from `walltime`, so a held/never-scheduled job cannot hang
+    # the campaign forever.
+    wait_timeout: float | None = None
+    # Seconds to keep re-checking result markers after the job leaves the queue,
+    # absorbing shared-filesystem (NFS/Lustre/GPFS) metadata lag.
+    marker_grace: float = 30.0
     module_loads: list[str] = []  # `module load ...` lines for job scripts
     extra_directives: list[str] = []  # raw #SBATCH / #PBS lines
     job_name: str = "trails-md"
@@ -296,14 +316,21 @@ class ExecutionConfig(BaseModel):
             raise ValueError("execution.backend must be 'local', 'slurm', or 'pbs'")
         return value
 
-    @field_validator("cpus_per_task", "max_retries")
+    @field_validator("cpus_per_task", "gpus_per_task", "max_retries")
     @classmethod
     def _non_negative_int(cls, value: int) -> int:
         if value < 0:
             raise ValueError("must be >= 0")
         return value
 
-    @field_validator("poll_interval", "submit_timeout")
+    @field_validator("max_in_flight", "max_array_size")
+    @classmethod
+    def _positive_optional_int(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("must be > 0 when set")
+        return value
+
+    @field_validator("poll_interval", "submit_timeout", "marker_grace")
     @classmethod
     def _positive_float(cls, value: float) -> float:
         if value <= 0:
@@ -349,6 +376,12 @@ class TrailsMDConfig(BaseModel):
     outdir: str = "runs/sampler_output"
     random_seed: int = 42
     checkpoint_freq: int = 1
+    # Fraction of walkers that must succeed for an iteration to proceed instead
+    # of aborting the campaign. 1.0 (default) keeps the strict legacy behaviour
+    # (any failure stops the run). Lower it (e.g. 0.9) for long HPC campaigns so
+    # a few transient node/GPU/integrator failures per iteration do not throw
+    # away days of progress; failed walkers are dropped and sampling continues.
+    min_success_fraction: float = 1.0
     save_features: bool = True
     retrain_freq: int = 1
     # CV-retraining policy: "fixed" (every retrain_freq iters) or "vamp_adaptive"
@@ -360,6 +393,11 @@ class TrailsMDConfig(BaseModel):
     aggregate_memory: bool = True
     max_adaptive_memory_frames: int = 50000
     adaptive_feature_type: str = "distances"
+    # Encoding for angular (phi_psi) input features before CV learning:
+    # "raw" (default, legacy) feeds radians directly; "sincos" applies the
+    # periodicity-safe [sin, cos] embedding (strongly recommended whenever a
+    # dihedral CV can cross ±pi — e.g. the AIB9 phi/psi workflow).
+    adaptive_angle_encoding: str = "raw"
     adaptive_model: AdaptiveModelConfig = Field(default_factory=AdaptiveModelConfig)
 
     @field_validator("retrain_policy")
@@ -367,6 +405,33 @@ class TrailsMDConfig(BaseModel):
     def _retrain_policy(cls, value: str) -> str:
         if value not in {"fixed", "vamp_adaptive"}:
             raise ValueError("retrain_policy must be 'fixed' or 'vamp_adaptive'")
+        return value
+
+    @field_validator("checkpoint_freq")
+    @classmethod
+    def _checkpoint_freq(cls, value: int) -> int:
+        # 0 explicitly disables checkpointing; negatives are meaningless
+        # (``iteration % negative``). Core logs a loud warning when it is 0 so
+        # the disabling is never silent (a walltime kill would otherwise lose
+        # the whole allocation with nothing to resume from).
+        if value < 0:
+            raise ValueError(
+                "checkpoint_freq must be >= 0 (0 disables checkpointing)"
+            )
+        return value
+
+    @field_validator("min_success_fraction")
+    @classmethod
+    def _min_success_fraction(cls, value: float) -> float:
+        if not 0.0 < value <= 1.0:
+            raise ValueError("min_success_fraction must be in (0, 1]")
+        return value
+
+    @field_validator("adaptive_angle_encoding")
+    @classmethod
+    def _angle_encoding(cls, value: str) -> str:
+        if value not in {"raw", "sincos"}:
+            raise ValueError("adaptive_angle_encoding must be 'raw' or 'sincos'")
         return value
 
     @field_validator("space_mode")

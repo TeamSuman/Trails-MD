@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import MDEngine, md_subprocess_timeout
+from .base import MDEngine, box_vectors_to_abc_angles, md_subprocess_timeout
 
 
 def resolve_amber_trajectory_format(
@@ -279,7 +279,11 @@ class AmberEngine(MDEngine):
         env = os.environ.copy()
         uses_cuda = self._uses_cuda()
         if uses_cuda:
-            env["CUDA_VISIBLE_DEVICES"] = str(device_index)
+            # device_index >= 0 is a local-backend GPU slot; a negative sentinel
+            # means the scheduler already bound CUDA_VISIBLE_DEVICES for this
+            # array task — inherit it rather than pinning every task to device 0.
+            if device_index >= 0:
+                env["CUDA_VISIBLE_DEVICES"] = str(device_index)
             libnvjitlink_dir = _find_libnvjitlink_dir()
             if libnvjitlink_dir:
                 existing_path = env.get("LD_LIBRARY_PATH", "")
@@ -420,7 +424,13 @@ class AmberEngine(MDEngine):
                 f"  imin=0, irest=0, ntx=1,\n"
                 f"  nstlim={steps}, dt={self.dt:.6f},\n"
                 f"  ntc=2, ntf=2,\n"
-                f"  ntt=3, gamma_ln=1.0, temp0={self.temperature:.2f},\n"
+                # tempi must equal temp0: a spawned frame carries no velocities
+                # (ntx=1, irest=0), so without tempi Amber generates velocities
+                # at the default tempi=0 K and every walker records a cold-start
+                # heat-up transient that pollutes the CV/MSM data. OpenMM and
+                # GROMACS both start at the target temperature.
+                f"  tempi={self.temperature:.2f}, temp0={self.temperature:.2f},\n"
+                f"  ntt=3, gamma_ln=1.0,\n"
                 f"  ig=-1,\n"
                 f"  ntb={ntb}, ntp={ntp},{pres_line}\n"
                 f"  cut=9.0,\n"
@@ -536,25 +546,11 @@ class AmberEngine(MDEngine):
 
     @staticmethod
     def _openmm_box_to_angstrom(box_vectors) -> np.ndarray | None:
-        """Convert an OpenMM box-vectors tuple to ``[a, b, c, 90, 90, 90]`` in Angstroms.
-
-        Only orthogonal boxes are currently supported; triclinic cells will
-        return ``None`` with a warning logged.
-        """
-        if box_vectors is None:
-            return None
+        """Convert an OpenMM box-vectors tuple to ``[a, b, c, α, β, γ]`` in
+        Angstroms/degrees, handling triclinic cells (see
+        :func:`trails_md.engines.base.box_vectors_to_abc_angles`)."""
         try:
-            from openmm.unit import is_quantity, nanometer  # type: ignore
-
-            bv = []
-            for vec in box_vectors:
-                if is_quantity(vec):
-                    vec = vec.value_in_unit(nanometer)
-                bv.append([float(vec[0]), float(vec[1]), float(vec[2])])
-            bv_ang = np.array(bv, dtype=np.float64) * 10.0  # nm → Å
-            # Assume orthorhombic: diagonal elements give a, b, c
-            a, b, c = bv_ang[0][0], bv_ang[1][1], bv_ang[2][2]
-            return np.array([a, b, c, 90.0, 90.0, 90.0], dtype=np.float64)
-        except (ImportError, TypeError, IndexError) as exc:
+            return box_vectors_to_abc_angles(box_vectors)
+        except (TypeError, IndexError) as exc:
             logging.warning("AmberEngine: could not parse box vectors (%s).", exc)
             return None

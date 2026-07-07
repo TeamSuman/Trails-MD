@@ -4,13 +4,61 @@ All notable changes to Trails-MD are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — `devel`
+## [Unreleased]
 
 This cycle turns Trails-MD from a coverage-driven adaptive sampler into an
 **MSM-convergence-driven** framework, hardens the engineering foundation, and
 adds first-class **HPC scalability** and **VAMP-2 feature optimisation**. It also
 adds a flux-weighted **transition-matrix convergence** gate with
 **uncertainty-guided spawning**, and opt-in **landscape-adaptive binning**.
+
+### HPC-scale review & hardening (this pass)
+
+Fixes and features from a code-review pass focused on large-scale atomistic MD on
+CPU/GPU HPC clusters (SLURM/PBS). Full findings: `docs/code_review.md`.
+
+- **SLURM poller fix (critical):** `squeue --array` output (`<jobid>_<taskid>`)
+  was never matched by the "job active?" check, so the driver gave up before
+  walkers finished and marked them all failed. Now matched line-anchored.
+- **Scheduler robustness:** poll-command timeouts are caught (no longer crash the
+  campaign); an overall `wait_timeout` cancels a held/unschedulable job instead
+  of hanging forever; a non-empty job id is required after submit; `max_in_flight`
+  throttles concurrent array elements (SLURM `%N`); `marker_grace` absorbs
+  shared-FS metadata lag; `scancel`/`qdel` cancellation hooks added.
+- **Scheduler scaling:** `max_array_size` splits a batch larger than the
+  scheduler's array-size cap (SLURM `MaxArraySize`, PBS `max_array_size`) into
+  sequential sub-arrays; the array manifest is tab-delimited so task/result paths
+  containing spaces survive the field split.
+- **Deterministic resume:** the Python/NumPy/torch RNG state is checkpointed and
+  restored (torch state stored as NumPy so the checkpoint unpickles without
+  torch), so a resumed run reproduces an uninterrupted run's spawn/training draws.
+- **Delta-checkpoint integrity:** each checkpoint records its delta chain
+  (`history_chain.json`); `reconstruct_history` loudly reports a broken chain (a
+  delta pruned/lost after the fact) instead of silently returning partial history.
+- **GPU binding on schedulers:** array tasks inherit the scheduler's
+  `CUDA_VISIBLE_DEVICES` (via a `WalkerTask.device_index = -1` sentinel) instead
+  of every task pinning to device 0; OpenMM degrades to CPU on any device-load
+  error instead of crashing the iteration.
+- **Partial-failure tolerance:** `min_success_fraction` (default `1.0`, unchanged
+  behaviour) lets long campaigns continue with the surviving walkers.
+- **Checkpoint durability & resume correctness:** the `format_version` completion
+  marker is now consulted everywhere, so a torn (crash-mid-save) checkpoint is
+  never chosen for resume; `_atomic_pickle` `fsync`s before rename; `torch.load`
+  uses `map_location="cpu"`; the checkpoint is written **last** in an iteration so
+  a resumed `iter_N` reflects the completed iteration's convergence / resolution /
+  MSM state; `torch` is now imported lazily.
+- **Engine correctness:** Amber walkers set `tempi=temp0` (no more 0 K cold-start
+  transient); triclinic boxes are converted correctly (no orthorhombic collapse)
+  for Amber/GROMACS re-seeding; GROMACS `grompp -maxwarn` is configurable and
+  strict (`0`) by default; deep-TICA projects in `eval()` mode.
+- **Science:** opt-in `adaptive_angle_encoding: sincos` for periodicity-safe
+  dihedral (`phi_psi`) CV features.
+- **Config validation:** `checkpoint_freq` (0 disables, logged loudly),
+  `gpus_per_task`, `max_in_flight`, `min_success_fraction`, `adaptive_angle_encoding`.
+- **HPC test suite:** `hpc_tests/` — SLURM + PBS × CPU + GPU end-to-end validation
+  with preflight, result validator, and a debugging playbook (`DEBUGGING.md`).
+- **Docs:** `docs/hpc_scaling.md` (execution model, limits, and a WESTPA
+  comparison/roadmap); `docs/code_review.md` (full findings & SOTA roadmap).
 
 ### Added
 
@@ -105,7 +153,8 @@ adds a flux-weighted **transition-matrix convergence** gate with
 
 #### Tooling & docs
 - Test suite (`pytest`) covering MSM, CV methods, execution backends, feature
-  selection, config, spawners, and hardening — **49 tests**.
+  selection, config, spawners, and hardening (see the "Suite 95 → 118" note
+  below for the current count).
 - GitHub Actions CI (Python 3.10 / 3.11) running ruff + pytest.
 - `ruff` / `black` / `isort` config, `.pre-commit-config.yaml`, `CONTRIBUTING.md`.
 - `docs/` site (MkDocs) and tutorials; `CHANGELOG.md`; example run scripts for
@@ -140,7 +189,8 @@ adds a flux-weighted **transition-matrix convergence** gate with
   hello-world; example configs for SPIB / deep-TICA / WE / target / PBS; an
   examples index; an API reference, references/citations page, and full CLI
   reference; +23 tests (delta checkpoint, reproducibility, timeout, spawners,
-  paths). Suite 95 → 118.
+  paths). Suite 95 → 118, then +14 HPC-review regression tests
+  (`tests/test_hpc_review_fixes.py`).
 
 ### Fixed (Phase 2)
 - Renamed `AdaptiveSpaceModel.fited` → `fitted` (with a backwards-compatible

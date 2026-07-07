@@ -160,10 +160,12 @@ class OpenMMEngine(MDEngine):
     def _create_simulation(self, device_index: int):
         platform_props = {}
         if self.platform_name == "CUDA":
-            platform_props = {
-                "Precision": self.precision,
-                "DeviceIndex": str(device_index),
-            }
+            platform_props = {"Precision": self.precision}
+            # device_index >= 0 is a local-backend GPU slot; a negative sentinel
+            # means "let the scheduler's CUDA_VISIBLE_DEVICES decide" (SLURM/PBS
+            # array tasks) so we don't pin every task to physical device 0.
+            if device_index >= 0:
+                platform_props["DeviceIndex"] = str(device_index)
             try:
                 self.simulation = Simulation(
                     self.topology,
@@ -173,9 +175,26 @@ class OpenMMEngine(MDEngine):
                     platform_props,
                 )
             except Exception as e:
-                if "CUDA_ERROR_NO_DEVICE" not in str(e):
+                # Any device-load failure (no device, bad index, driver mismatch)
+                # should degrade to CPU rather than kill the walker/iteration.
+                message = str(e)
+                cuda_device_error = any(
+                    token in message
+                    for token in (
+                        "CUDA_ERROR_NO_DEVICE",
+                        "could not be loaded",
+                        "no CUDA-capable device",
+                        "invalid device",
+                    )
+                )
+                if not cuda_device_error:
                     raise
-                print("CUDA device unavailable; falling back to CPU platform.")
+                import logging
+
+                logging.warning(
+                    "OpenMM CUDA device unavailable (%s); falling back to CPU.",
+                    message,
+                )
                 self.platform = self._get_platform("CPU")
                 self.platform_name = "CPU"
                 self.simulation = Simulation(

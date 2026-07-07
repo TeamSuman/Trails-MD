@@ -51,6 +51,11 @@ class TrailsMDCore:
 
         # Initialize Checkpoint Manager
         self.checkpoint_manager = CheckpointManager(str(self.outdir / "checkpoints"))
+        if self.config.checkpoint_freq == 0:
+            logging.warning(
+                "checkpoint_freq=0: checkpointing is DISABLED. A walltime kill or "
+                "node failure will lose the whole run with nothing to resume from."
+            )
 
         # Terminal progress reporter (presentation only).
         self.reporter = IterationReporter()
@@ -326,7 +331,6 @@ class TrailsMDCore:
             if n_frames >= n_walkers:
                 logging.info(f"Using uniform sampling for {n_walkers} starting walkers from {n_frames} frames.")
                 spawn_indices = list(np.linspace(0, n_frames - 1, n_walkers, dtype=int))
-                print("EXACT SPAWN INDICES:", spawn_indices)
             else:
                 logging.info(f"Only {n_frames} frames available for {n_walkers} walkers; replicating randomly.")
                 spawn_indices = [random.choice(range(n_frames)) for _ in range(n_walkers)]
@@ -407,8 +411,16 @@ class TrailsMDCore:
         )
 
         runner_time = time.time() - runner_start_time
-        if not all(results):
-            failed = results.count(False)
+        n_walkers = len(results)
+        n_ok = sum(1 for ok in results if ok)
+        min_fraction = getattr(self.config, "min_success_fraction", 1.0)
+        # Abort only when too few walkers succeeded. With the default
+        # min_success_fraction=1.0 this fires on any failure (strict legacy
+        # behaviour); a lower threshold lets a long HPC campaign shrug off a few
+        # transient walker failures per iteration and continue with the
+        # survivors instead of discarding days of progress.
+        if n_ok == 0 or n_ok < min_fraction * n_walkers:
+            failed = n_walkers - n_ok
             iteration_dir = self.outdir / f"iter_{self.iteration}"
             expected = [
                 iteration_dir / f"iteration_{self.iteration}_{idx}.{self._traj_suffix()}"
@@ -422,12 +434,27 @@ class TrailsMDCore:
                 else ""
             )
             raise RuntimeError(
-                f"{failed} walker(s) failed during iteration {self.iteration}; "
+                f"{failed}/{n_walkers} walker(s) failed during iteration "
+                f"{self.iteration} (min_success_fraction={min_fraction}); "
                 "stopping before CV extraction." + detail
             )
         other_start_time = time.time()
         if len(self.walker_parents) != len(walkers):
             self.walker_parents = [None for _ in walkers]
+
+        # Keep only the walkers that produced usable trajectories; drop the
+        # failed ones (and their lineage parents) so downstream indexing stays
+        # consistent. When every walker succeeds this is a no-op.
+        ok_indices = [idx for idx, ok in enumerate(results) if ok]
+        if len(ok_indices) < n_walkers:
+            logging.warning(
+                "Iteration %d: %d/%d walkers failed; continuing with %d survivors.",
+                self.iteration,
+                n_walkers - n_ok,
+                n_walkers,
+                n_ok,
+            )
+            self.walker_parents = [self.walker_parents[i] for i in ok_indices]
 
         # 2. Extract and project coordinates
         trajectories = [
@@ -436,7 +463,7 @@ class TrailsMDCore:
                 / f"iter_{self.iteration}"
                 / f"iteration_{self.iteration}_{idx}.{self._traj_suffix()}"
             )
-            for idx in range(len(walkers))
+            for idx in ok_indices
         ]
         self._validate_trajectory_files(trajectories)
         trajectory_topology = (
@@ -604,20 +631,6 @@ class TrailsMDCore:
             self.history[self.iteration]["features"] = features
             self.history[self.iteration]["space_version"] = self.adaptive_space_version
 
-        # 3. Save checkpoint (if frequency matches)
-        if (
-            self.config.checkpoint_freq > 0
-            and self.iteration % self.config.checkpoint_freq == 0
-        ):
-            self.checkpoint_manager.save(
-                iteration=self.iteration,
-                space_model=self.space_model,
-                scaler=self.scaler,
-                bin_state=self.bin_state,
-                history=self.history,
-                sampler_state=self._checkpoint_state(),
-            )
-
         self.iteration += 1
         self.walker_parents = next_walker_parents
         other_time = time.time() - other_start_time
@@ -663,6 +676,24 @@ class TrailsMDCore:
         self._maybe_build_msm()
 
         current_iteration = self.iteration - 1
+
+        # Save the checkpoint LAST, after occupancy/resolution/convergence and
+        # MSM bookkeeping have run, so a resumed ``iter_N`` reflects the fully
+        # completed iteration N (an adaptive n_bins bump or a convergence flag
+        # set during post-processing would otherwise be lost on resume).
+        if (
+            self.config.checkpoint_freq > 0
+            and current_iteration % self.config.checkpoint_freq == 0
+        ):
+            self.checkpoint_manager.save(
+                iteration=current_iteration,
+                space_model=self.space_model,
+                scaler=self.scaler,
+                bin_state=self.bin_state,
+                history=self.history,
+                sampler_state=self._checkpoint_state(),
+            )
+
         self._append_iteration_log(
             iteration=current_iteration,
             runner_time=runner_time,
@@ -804,6 +835,8 @@ class TrailsMDCore:
             self.walker_parents = list(latest_entry.get("next_walker_parents") or [])
 
     def _checkpoint_state(self) -> dict[str, Any]:
+        from trails_md.utils.seeds import capture_rng_state
+
         return {
             "n_bins": list(self.config.n_bins),
             "voronoi_clusters": self.config.spawning.voronoi_clusters,
@@ -818,6 +851,8 @@ class TrailsMDCore:
             "feature_selection_indices": self.feature_selection_indices,
             "selected_feature_type": self.selected_feature_type,
             "retrain_controller": self.retrain_controller.state_dict(),
+            # RNG state so a resumed run reproduces an uninterrupted one's stream.
+            "rng_state": capture_rng_state(),
         }
 
     def _restore_sampler_state(self, state: dict[str, Any] | None) -> None:
@@ -842,6 +877,12 @@ class TrailsMDCore:
         self.retrain_controller.load_state_dict(state.get("retrain_controller", {}))
         if self.msm_monitor is not None and state.get("msm_monitor"):
             self.msm_monitor.load_state_dict(state["msm_monitor"])
+        # Restore the RNG stream last so it overrides the base seed set in
+        # __init__ — resumed spawn/training draws then match an uninterrupted run.
+        if state.get("rng_state") is not None:
+            from trails_md.utils.seeds import restore_rng_state
+
+            restore_rng_state(state["rng_state"])
 
     @staticmethod
     def _trajectory_file_problems(trajectories: list[str]) -> list[str]:
@@ -926,7 +967,14 @@ class TrailsMDCore:
         self, feature_extractor: FeatureExtractor, trajectories: list[str], ftype: str
     ) -> np.ndarray:
         if ftype == "phi_psi":
-            return feature_extractor.extract_aib9_phi_psi(trajectories)
+            angles = feature_extractor.extract_aib9_phi_psi(trajectories)
+            if getattr(self.config, "adaptive_angle_encoding", "raw") == "sincos":
+                # Continuous [sin, cos] embedding so the periodic dihedral CVs are
+                # not torn at ±pi before scaling / CV learning.
+                from trails_md.utils.math import encode_angles_sincos
+
+                return encode_angles_sincos(angles)
+            return angles
         if ftype == "fitted_coords":
             return feature_extractor.extract_fitted_coords(trajectories)
         return feature_extractor.extract_pairwise_distances(trajectories)

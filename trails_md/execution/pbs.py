@@ -42,6 +42,9 @@ class PBSBackend(SchedulerBackend):
     def _poll_command(self, job_id: str) -> list[str]:
         return ["qstat", "-t", job_id]
 
+    def _cancel_command(self, job_id: str) -> list[str]:
+        return ["qdel", job_id]
+
     def _job_active(self, job_id: str, poll_stdout: str, returncode: int) -> bool:
         # qstat returns non-zero once the job is fully gone from the system.
         if returncode != 0:

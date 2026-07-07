@@ -3,6 +3,49 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 
+def box_vectors_to_abc_angles(box_vectors):
+    """Convert OpenMM periodic box vectors (nm) to ``[a, b, c, α, β, γ]`` in
+    Angstrom / degrees, **correctly for triclinic cells**.
+
+    Amber and GROMACS solvation almost always uses a truncated octahedron or
+    rhombic dodecahedron (a triclinic box with large off-diagonal components).
+    The previous per-engine converters read only the box-vector diagonal and
+    hard-coded 90° angles, silently rewriting such a box as a wrong orthorhombic
+    cell — corrupting volume/density, the minimum image, and pressure coupling.
+    This helper derives the true cell edges and angles from the full vectors.
+
+    Returns ``None`` for a non-periodic system (``box_vectors is None``) or a
+    degenerate (zero-length) box.
+    """
+    import numpy as np
+
+    if box_vectors is None:
+        return None
+    try:
+        from openmm.unit import is_quantity, nanometer  # type: ignore
+
+        def _strip(vec):
+            return vec.value_in_unit(nanometer) if is_quantity(vec) else vec
+    except ImportError:  # OpenMM absent: assume raw nm values
+
+        def _strip(vec):
+            return vec
+
+    rows = []
+    for vec in box_vectors:
+        vec = _strip(vec)
+        rows.append([float(vec[0]), float(vec[1]), float(vec[2])])
+    vectors = np.asarray(rows, dtype=float) * 10.0  # nm → Å
+    a_vec, b_vec, c_vec = vectors[0], vectors[1], vectors[2]
+    a, b, c = (float(np.linalg.norm(v)) for v in (a_vec, b_vec, c_vec))
+    if min(a, b, c) <= 0.0:
+        return None
+    alpha = float(np.degrees(np.arccos(np.clip(b_vec @ c_vec / (b * c), -1.0, 1.0))))
+    beta = float(np.degrees(np.arccos(np.clip(a_vec @ c_vec / (a * c), -1.0, 1.0))))
+    gamma = float(np.degrees(np.arccos(np.clip(a_vec @ b_vec / (a * b), -1.0, 1.0))))
+    return np.array([a, b, c, alpha, beta, gamma], dtype=float)
+
+
 def md_subprocess_timeout() -> float | None:
     """Timeout (seconds) for external MD subprocesses, or None for no limit.
 

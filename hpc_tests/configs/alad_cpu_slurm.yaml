@@ -1,0 +1,63 @@
+# HPC test config — CPU-only queue, SLURM backend.
+#
+# Reuses the self-contained alanine-dipeptide hello-world assets (vacuum Amber14
+# system, no external force fields, no GPU). Each walker is dispatched as one
+# element of a SLURM array job. This exercises the full submit -> poll -> collect
+# -> retry path on a real cluster with a tiny, fast workload.
+#
+# EDIT the `execution` block for your site (partition, account, module_loads).
+# Validate first:  trails-md --config hpc_tests/configs/alad_cpu_slurm.yaml --check
+
+system:
+  conf_file: ../../examples/alanine_dipeptide/structure.pdb
+  top_file: ../../examples/alanine_dipeptide/structure.pdb
+  topology: amber
+  system_file: ../../examples/alanine_dipeptide/system.py
+  project_file: ../../examples/alanine_dipeptide/project_phi_psi.py
+  trajectory_topology_file: ../../examples/alanine_dipeptide/structure.pdb
+  feature_selection: "protein and not (type H)"
+
+engine:
+  md_engine: openmm
+  platform_name: CPU          # CPU-only queue
+  temperature: 300.0
+  dt: 0.002
+  npt: false
+
+spawning:
+  spawn_scheme: density
+  spawn_type: hard
+  search_mode: explore
+  walker: 8                    # 8 array elements per iteration
+  step: 1000                   # 2 ps each — fast
+  stride: 100
+  max_workers: 8               # ignored by scheduler backends (per-task resources below)
+
+execution:
+  backend: slurm
+  # ---- EDIT FOR YOUR SITE ----
+  partition: null              # e.g. "cpu" / "batch"
+  account: null                # e.g. "my_alloc"
+  walltime: "00:20:00"
+  cpus_per_task: 2             # OpenMM CPU threads per walker
+  gpus_per_task: 0             # CPU-only queue
+  memory: "4G"
+  module_loads: []             # e.g. ["module load anaconda3"]; MUST make `trails-md` importable
+  extra_directives: []         # e.g. ["#SBATCH --qos=normal"]
+  # ---- robustness knobs exercised by this test ----
+  max_retries: 1
+  poll_interval: 15
+  max_in_flight: 8             # cap concurrent array elements
+  marker_grace: 30             # tolerate shared-FS metadata lag
+  wait_timeout: null           # derive a ceiling from walltime
+
+space_mode: fixed
+n_bins: [18, 18]
+min_values: [-3.141592653589793, -3.141592653589793]
+max_values: [3.141592653589793, 3.141592653589793]
+
+outdir: runs/hpc_alad_cpu_slurm
+random_seed: 42
+checkpoint_freq: 1
+min_success_fraction: 1.0      # set < 1.0 to tolerate transient walker failures
+save_features: false

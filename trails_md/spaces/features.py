@@ -3,6 +3,10 @@ import MDAnalysis as mda  # type: ignore
 import numpy as np
 from MDAnalysis.lib.distances import distance_array  # type: ignore
 
+# Re-exported for convenience; the implementation lives in utils.math so it is
+# importable without MDAnalysis.
+from trails_md.utils.math import encode_angles_sincos  # noqa: F401
+
 
 def _load_universe(topology: str, trajectories: list[str] | str, **kwargs) -> mda.Universe:
     """Helper to load an MDAnalysis Universe, automatically passing format="TRJ" for Amber ASCII trajectories."""

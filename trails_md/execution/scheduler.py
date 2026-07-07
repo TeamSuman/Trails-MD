@@ -18,6 +18,7 @@ with a fake scheduler that runs tasks synchronously.
 from __future__ import annotations
 
 import json
+import logging
 import pickle
 import subprocess
 import time
@@ -29,11 +30,46 @@ from .base import ExecutionBackend, WalkerTask
 
 CommandRunner = Callable[[list[str], float], "subprocess.CompletedProcess[str]"]
 
+logger = logging.getLogger(__name__)
+
 
 def _default_command_runner(cmd: list[str], timeout: float):
     return subprocess.run(
         cmd, capture_output=True, text=True, timeout=timeout, check=False
     )
+
+
+def parse_walltime_seconds(walltime: str) -> float | None:
+    """Best-effort conversion of a scheduler walltime string to seconds.
+
+    Accepts ``HH:MM:SS``, ``MM:SS``, ``D-HH:MM:SS`` (SLURM), or a bare integer
+    number of seconds/minutes. Returns ``None`` when the format is not
+    recognised, so callers can fall back to an unbounded wait.
+    """
+    if not walltime:
+        return None
+    text = str(walltime).strip()
+    days = 0
+    if "-" in text:  # SLURM D-HH:MM:SS
+        day_part, _, text = text.partition("-")
+        try:
+            days = int(day_part)
+        except ValueError:
+            return None
+    parts = text.split(":")
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        return None
+    if len(nums) == 3:
+        h, m, s = nums
+    elif len(nums) == 2:
+        h, m, s = 0, nums[0], nums[1]
+    elif len(nums) == 1:
+        h, m, s = 0, 0, nums[0]
+    else:
+        return None
+    return days * 86400 + h * 3600 + m * 60 + s
 
 
 class SchedulerBackend(ExecutionBackend):
@@ -51,11 +87,16 @@ class SchedulerBackend(ExecutionBackend):
         max_retries: int = 1,
         poll_interval: float = 30.0,
         submit_timeout: float = 60.0,
+        max_in_flight: int | None = None,
+        max_array_size: int | None = None,
+        wait_timeout: float | None = None,
+        marker_grace: float = 30.0,
         module_loads: list[str] | None = None,
         extra_directives: list[str] | None = None,
         job_name: str = "trails-md",
         command_runner: CommandRunner | None = None,
         sleep_fn: Callable[[float], None] | None = None,
+        clock_fn: Callable[[], float] | None = None,
         python_executable: str | None = None,
         **_,
     ):
@@ -68,11 +109,27 @@ class SchedulerBackend(ExecutionBackend):
         self.max_retries = max_retries
         self.poll_interval = poll_interval
         self.submit_timeout = submit_timeout
+        # Cap concurrently-running array elements (SLURM ``%N``); ``None`` = no cap.
+        self.max_in_flight = max_in_flight
+        # Split a batch larger than this into multiple sub-arrays so a single
+        # iteration's walker count can exceed the scheduler's array-size limit
+        # (SLURM ``MaxArraySize`` default 1001; PBS ``max_array_size``). ``None``
+        # submits one array (legacy behaviour).
+        self.max_array_size = max_array_size
+        # Overall ceiling (seconds) on how long to wait for one array job before
+        # cancelling it and treating unfinished walkers as failed. ``None``
+        # derives a generous bound from ``walltime`` so a held / never-scheduled
+        # job cannot hang the campaign forever.
+        self.wait_timeout = wait_timeout
+        # How long to keep re-checking result markers after the job leaves the
+        # queue, to absorb shared-filesystem (NFS/Lustre) metadata lag.
+        self.marker_grace = marker_grace
         self.module_loads = list(module_loads or [])
         self.extra_directives = list(extra_directives or [])
         self.job_name = job_name
         self._run_command = command_runner or _default_command_runner
         self._sleep = sleep_fn or time.sleep
+        self._clock = clock_fn or time.monotonic
         import sys
 
         self.python_executable = python_executable or sys.executable
@@ -102,6 +159,14 @@ class SchedulerBackend(ExecutionBackend):
     @abstractmethod
     def _job_active(self, job_id: str, poll_stdout: str, returncode: int) -> bool:
         """True while any array element is still queued/running."""
+
+    def _cancel_command(self, job_id: str) -> list[str] | None:
+        """Command to cancel a running job (``scancel`` / ``qdel``).
+
+        Returns ``None`` when cancellation is unsupported. Overridden by the
+        concrete backends.
+        """
+        return None
 
     # ── core flow ───────────────────────────────────────────────────────────
     def execute(self, tasks: list[WalkerTask]) -> list[bool]:
@@ -144,26 +209,59 @@ class SchedulerBackend(ExecutionBackend):
         for idx in pending:
             result_files[idx].unlink(missing_ok=True)
 
-        manifest = jobdir / f"manifest_attempt{attempt}.txt"
+        # Chunk the batch so a single array never exceeds the scheduler's
+        # array-size limit. One chunk => legacy single-array behaviour + names.
+        size = self.max_array_size if self.max_array_size and self.max_array_size > 0 else len(pending)
+        chunks = [pending[i : i + size] for i in range(0, len(pending), size)] or [[]]
+        for chunk_no, chunk in enumerate(chunks):
+            tag = (
+                f"attempt{attempt}"
+                if len(chunks) == 1
+                else f"attempt{attempt}_chunk{chunk_no}"
+            )
+            self._dispatch_chunk(tag, chunk, task_files, result_files, jobdir)
+
+    def _dispatch_chunk(
+        self,
+        tag: str,
+        chunk: list[int],
+        task_files: dict[int, Path],
+        result_files: dict[int, Path],
+        jobdir: Path,
+    ) -> None:
+        # Tab-delimited manifest so task/result paths containing spaces survive
+        # the array script's field split (``cut -f`` defaults to a TAB delimiter).
+        manifest = jobdir / f"manifest_{tag}.txt"
         manifest.write_text(
-            "\n".join(f"{task_files[i]} {result_files[i]}" for i in pending) + "\n"
+            "\n".join(f"{task_files[i]}\t{result_files[i]}" for i in chunk) + "\n"
         )
-        logdir = jobdir / f"logs_attempt{attempt}"
+        logdir = jobdir / f"logs_{tag}"
         logdir.mkdir(exist_ok=True)
-        script = self._render_script(len(pending), manifest, logdir)
-        script_path = jobdir / f"submit_attempt{attempt}.sh"
+        script = self._render_script(len(chunk), manifest, logdir)
+        script_path = jobdir / f"submit_{tag}.sh"
         script_path.write_text(script)
 
-        proc = self._run_command(
-            self._submit_command(script_path), self.submit_timeout
-        )
+        try:
+            proc = self._run_command(
+                self._submit_command(script_path), self.submit_timeout
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"{type(self).__name__} submission timed out after "
+                f"{self.submit_timeout}s"
+            ) from exc
         if proc.returncode != 0:
             raise RuntimeError(
                 f"{type(self).__name__} submission failed (exit {proc.returncode}): "
                 f"{proc.stderr.strip()}"
             )
         job_id = self._parse_job_id(proc.stdout)
-        self._wait_for_completion(job_id, [result_files[i] for i in pending])
+        if not job_id:
+            raise RuntimeError(
+                f"{type(self).__name__} submission returned no parseable job id; "
+                f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+            )
+        self._wait_for_completion(job_id, [result_files[i] for i in chunk])
 
     def _render_script(self, n_tasks: int, manifest: Path, logdir: Path) -> str:
         lines = ["#!/bin/bash"]
@@ -172,25 +270,82 @@ class SchedulerBackend(ExecutionBackend):
         lines += self.module_loads
         lines.append(f'MANIFEST="{manifest}"')
         lines.append(f'LINE=$(sed -n "$((${self.array_index_var}+1))p" "$MANIFEST")')
-        lines.append('TASK_PKL=$(echo "$LINE" | cut -d" " -f1)')
-        lines.append('RESULT_JSON=$(echo "$LINE" | cut -d" " -f2)')
+        # cut's default delimiter is TAB, matching the manifest — keeps paths
+        # containing spaces intact.
+        lines.append('TASK_PKL=$(printf "%s" "$LINE" | cut -f1)')
+        lines.append('RESULT_JSON=$(printf "%s" "$LINE" | cut -f2)')
         lines.append(
             f'"{self.python_executable}" -m trails_md.execution.run_task '
             '"$TASK_PKL" "$RESULT_JSON"'
         )
         return "\n".join(lines) + "\n"
 
+    def _resolve_wait_timeout(self) -> float | None:
+        if self.wait_timeout is not None:
+            return self.wait_timeout
+        # Derive a generous ceiling from the requested walltime: the job cannot
+        # legitimately run longer than its walltime, so allow that plus queueing
+        # slack. Unrecognised walltime strings fall back to an unbounded wait.
+        base = parse_walltime_seconds(self.walltime)
+        if base is None:
+            return None
+        return base * 2.0 + 3600.0
+
     def _wait_for_completion(self, job_id: str, expected: list[Path]) -> None:
+        deadline_budget = self._resolve_wait_timeout()
+        start = self._clock()
         while True:
             if all(path.exists() for path in expected):
                 return
-            proc = self._run_command(self._poll_command(job_id), self.submit_timeout)
+            if deadline_budget is not None and self._clock() - start > deadline_budget:
+                logger.error(
+                    "%s job %s exceeded wait_timeout=%.0fs; cancelling and treating "
+                    "unfinished walkers as failed.",
+                    type(self).__name__,
+                    job_id,
+                    deadline_budget,
+                )
+                self._cancel_job(job_id)
+                return
+            try:
+                proc = self._run_command(
+                    self._poll_command(job_id), self.submit_timeout
+                )
+            except subprocess.TimeoutExpired:
+                # A slow scheduler poll (common at scale) must not crash the
+                # campaign — the filesystem markers remain the source of truth.
+                logger.warning(
+                    "%s poll for job %s timed out after %.0fs; retrying next cycle.",
+                    type(self).__name__,
+                    job_id,
+                    self.submit_timeout,
+                )
+                self._sleep(self.poll_interval)
+                continue
             if not self._job_active(job_id, proc.stdout, proc.returncode):
-                # Job left the queue; give markers a brief grace then stop.
-                if not all(path.exists() for path in expected):
-                    self._sleep(min(self.poll_interval, 2.0))
+                # Job left the queue; re-check markers over a grace window to
+                # absorb shared-filesystem metadata lag before giving up.
+                self._await_markers_after_exit(expected)
                 return
             self._sleep(self.poll_interval)
+
+    def _await_markers_after_exit(self, expected: list[Path]) -> None:
+        waited = 0.0
+        step = min(self.poll_interval, 5.0) or 1.0
+        while waited < self.marker_grace:
+            if all(path.exists() for path in expected):
+                return
+            self._sleep(step)
+            waited += step
+
+    def _cancel_job(self, job_id: str) -> None:
+        cmd = self._cancel_command(job_id)
+        if not cmd:
+            return
+        try:
+            self._run_command(cmd, self.submit_timeout)
+        except (subprocess.TimeoutExpired, OSError) as exc:  # best-effort
+            logger.warning("Failed to cancel job %s: %s", job_id, exc)
 
     @staticmethod
     def _read_success(result_file: Path) -> bool:

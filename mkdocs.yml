@@ -31,6 +31,7 @@ nav:
   - Collective variables: cv_methods.md
   - MSM & kinetic seeding: msm.md
   - Execution (workstation & HPC): execution.md
+  - HPC scaling & WESTPA comparison: hpc_scaling.md
   - CLI reference: cli.md
   - References: references.md
   - Tutorials:

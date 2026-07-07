@@ -45,7 +45,10 @@ class WalkerTask:
     stride: int
     traj_out: str
     start_coords: Any = None
-    device_index: int = 0
+    # -1 is a sentinel meaning "device binding is managed externally" (a SLURM /
+    # PBS array task inherits the scheduler's CUDA_VISIBLE_DEVICES). The local
+    # backend overwrites this with a concrete GPU slot (>= 0) at dispatch time.
+    device_index: int = -1
 
     def run_kwargs(self) -> dict:
         return {
