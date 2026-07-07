@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import pickle
@@ -70,6 +71,30 @@ def reconstruct_history(checkpoint_root: Path, iteration: int) -> dict[Any, Any]
     whole restore.
     """
     iters = [it for it in _complete_checkpoint_iters(checkpoint_root) if it <= iteration]
+
+    # Integrity check: each checkpoint records the delta chain it depends on. If a
+    # required delta was pruned/lost after the fact, the reconstructed history is
+    # incomplete — surface that LOUDLY instead of silently dropping keys.
+    chain_file = checkpoint_root / f"iter_{iteration}" / "history_chain.json"
+    if chain_file.exists():
+        try:
+            required = [int(x) for x in json.loads(chain_file.read_text())]
+        except (json.JSONDecodeError, OSError, ValueError, TypeError):
+            required = []
+        missing = [
+            r
+            for r in required
+            if not (checkpoint_root / f"iter_{r}" / "history.pkl").exists()
+        ]
+        if missing:
+            logging.error(
+                "Delta-checkpoint history chain is broken: history deltas for "
+                "iteration(s) %s are missing (pruned or lost). The reconstructed "
+                "history will be INCOMPLETE and lineage/MSM over those iterations "
+                "is unreliable — resume from a self-contained/earlier checkpoint.",
+                missing,
+            )
+
     full: dict[Any, Any] = {}
     for it in iters:
         hist_file = checkpoint_root / f"iter_{it}" / "history.pkl"
@@ -141,6 +166,15 @@ class CheckpointManager:
             k: v for k, v in history.items() if k > last_ckpt and k <= iteration
         }
         _atomic_pickle(delta_history, iter_dir / "history.pkl")
+
+        # Record the delta chain this checkpoint depends on (all prior complete
+        # checkpoints plus this one). reconstruct_history() uses it to detect and
+        # loudly report a broken chain (a delta pruned/lost after the fact) rather
+        # than silently returning an incomplete history.
+        chain = sorted(set(_complete_checkpoint_iters(self.checkpoint_dir)) | {iteration})
+        tmp = iter_dir / "history_chain.json.tmp"
+        tmp.write_text(json.dumps(chain))
+        os.replace(tmp, iter_dir / "history_chain.json")
 
         if sampler_state is not None:
             _atomic_pickle(sampler_state, iter_dir / "sampler_state.pkl")

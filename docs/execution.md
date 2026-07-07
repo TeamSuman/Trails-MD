@@ -71,10 +71,10 @@ execution:
   absorbing NFS/Lustre/GPFS metadata lag so genuinely-successful walkers are not
   misreported as failed.
 
-!!! warning "Array-size limits"
-    One array element is submitted per walker with no chunking yet. SLURM's
-    `MaxArraySize` (default 1001) and PBS's `max_array_size` therefore cap
-    walkers-per-iteration. For very large fan-out see
+!!! note "Array-size limits"
+    One array element is submitted per walker. SLURM's `MaxArraySize` (default
+    1001) and PBS's `max_array_size` cap a single array; set `max_array_size` to
+    split a larger batch into sequential sub-arrays. For very large fan-out see
     [HPC scaling](hpc_scaling.md).
 
 ## PBS (OpenPBS / PBS Pro)

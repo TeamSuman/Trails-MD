@@ -292,6 +292,10 @@ class ExecutionConfig(BaseModel):
     # cap. Set this when submitting hundreds/thousands of walkers to respect
     # site submit-rate / MaxArraySize policies.
     max_in_flight: int | None = None
+    # Split a batch larger than this into multiple sub-arrays, so walkers-per-
+    # iteration can exceed the scheduler's array-size cap (SLURM MaxArraySize
+    # default 1001; PBS max_array_size). None = one array (legacy).
+    max_array_size: int | None = None
     # Overall ceiling (seconds) on waiting for one iteration's array job before
     # it is cancelled and unfinished walkers are marked failed. None derives a
     # generous bound from `walltime`, so a held/never-scheduled job cannot hang
@@ -319,11 +323,11 @@ class ExecutionConfig(BaseModel):
             raise ValueError("must be >= 0")
         return value
 
-    @field_validator("max_in_flight")
+    @field_validator("max_in_flight", "max_array_size")
     @classmethod
     def _positive_optional_int(cls, value: int | None) -> int | None:
         if value is not None and value <= 0:
-            raise ValueError("execution.max_in_flight must be > 0 when set")
+            raise ValueError("must be > 0 when set")
         return value
 
     @field_validator("poll_interval", "submit_timeout", "marker_grace")

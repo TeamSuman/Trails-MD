@@ -86,6 +86,7 @@ Where walkers run (workstation vs HPC). See [Execution](execution.md).
 | `max_retries` | `1` | Resubmit failed walkers up to N times. |
 | `poll_interval` / `submit_timeout` | `30` / `60` | Polling / command timeouts (s). |
 | `max_in_flight` | `None` | Cap concurrent array elements (SLURM `%N`); set for large batches. |
+| `max_array_size` | `None` | Split batches larger than this into sub-arrays (beat SLURM `MaxArraySize` / PBS `max_array_size`). |
 | `wait_timeout` | `None` | Ceiling (s) on waiting for one array job before cancel; `None` derives from `walltime`. |
 | `marker_grace` | `30` | Seconds to keep re-checking result markers after the job leaves the queue (shared-FS lag). |
 | `module_loads` / `extra_directives` | `[]` / `[]` | `module load` lines / raw scheduler directives. |

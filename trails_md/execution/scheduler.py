@@ -88,6 +88,7 @@ class SchedulerBackend(ExecutionBackend):
         poll_interval: float = 30.0,
         submit_timeout: float = 60.0,
         max_in_flight: int | None = None,
+        max_array_size: int | None = None,
         wait_timeout: float | None = None,
         marker_grace: float = 30.0,
         module_loads: list[str] | None = None,
@@ -110,6 +111,11 @@ class SchedulerBackend(ExecutionBackend):
         self.submit_timeout = submit_timeout
         # Cap concurrently-running array elements (SLURM ``%N``); ``None`` = no cap.
         self.max_in_flight = max_in_flight
+        # Split a batch larger than this into multiple sub-arrays so a single
+        # iteration's walker count can exceed the scheduler's array-size limit
+        # (SLURM ``MaxArraySize`` default 1001; PBS ``max_array_size``). ``None``
+        # submits one array (legacy behaviour).
+        self.max_array_size = max_array_size
         # Overall ceiling (seconds) on how long to wait for one array job before
         # cancelling it and treating unfinished walkers as failed. ``None``
         # derives a generous bound from ``walltime`` so a held / never-scheduled
@@ -203,14 +209,36 @@ class SchedulerBackend(ExecutionBackend):
         for idx in pending:
             result_files[idx].unlink(missing_ok=True)
 
-        manifest = jobdir / f"manifest_attempt{attempt}.txt"
+        # Chunk the batch so a single array never exceeds the scheduler's
+        # array-size limit. One chunk => legacy single-array behaviour + names.
+        size = self.max_array_size if self.max_array_size and self.max_array_size > 0 else len(pending)
+        chunks = [pending[i : i + size] for i in range(0, len(pending), size)] or [[]]
+        for chunk_no, chunk in enumerate(chunks):
+            tag = (
+                f"attempt{attempt}"
+                if len(chunks) == 1
+                else f"attempt{attempt}_chunk{chunk_no}"
+            )
+            self._dispatch_chunk(tag, chunk, task_files, result_files, jobdir)
+
+    def _dispatch_chunk(
+        self,
+        tag: str,
+        chunk: list[int],
+        task_files: dict[int, Path],
+        result_files: dict[int, Path],
+        jobdir: Path,
+    ) -> None:
+        # Tab-delimited manifest so task/result paths containing spaces survive
+        # the array script's field split (``cut -f`` defaults to a TAB delimiter).
+        manifest = jobdir / f"manifest_{tag}.txt"
         manifest.write_text(
-            "\n".join(f"{task_files[i]} {result_files[i]}" for i in pending) + "\n"
+            "\n".join(f"{task_files[i]}\t{result_files[i]}" for i in chunk) + "\n"
         )
-        logdir = jobdir / f"logs_attempt{attempt}"
+        logdir = jobdir / f"logs_{tag}"
         logdir.mkdir(exist_ok=True)
-        script = self._render_script(len(pending), manifest, logdir)
-        script_path = jobdir / f"submit_attempt{attempt}.sh"
+        script = self._render_script(len(chunk), manifest, logdir)
+        script_path = jobdir / f"submit_{tag}.sh"
         script_path.write_text(script)
 
         try:
@@ -233,7 +261,7 @@ class SchedulerBackend(ExecutionBackend):
                 f"{type(self).__name__} submission returned no parseable job id; "
                 f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
             )
-        self._wait_for_completion(job_id, [result_files[i] for i in pending])
+        self._wait_for_completion(job_id, [result_files[i] for i in chunk])
 
     def _render_script(self, n_tasks: int, manifest: Path, logdir: Path) -> str:
         lines = ["#!/bin/bash"]
@@ -242,8 +270,10 @@ class SchedulerBackend(ExecutionBackend):
         lines += self.module_loads
         lines.append(f'MANIFEST="{manifest}"')
         lines.append(f'LINE=$(sed -n "$((${self.array_index_var}+1))p" "$MANIFEST")')
-        lines.append('TASK_PKL=$(echo "$LINE" | cut -d" " -f1)')
-        lines.append('RESULT_JSON=$(echo "$LINE" | cut -d" " -f2)')
+        # cut's default delimiter is TAB, matching the manifest — keeps paths
+        # containing spaces intact.
+        lines.append('TASK_PKL=$(printf "%s" "$LINE" | cut -f1)')
+        lines.append('RESULT_JSON=$(printf "%s" "$LINE" | cut -f2)')
         lines.append(
             f'"{self.python_executable}" -m trails_md.execution.run_task '
             '"$TASK_PKL" "$RESULT_JSON"'

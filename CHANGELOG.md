@@ -25,6 +25,16 @@ CPU/GPU HPC clusters (SLURM/PBS). Full findings: `docs/code_review.md`.
   of hanging forever; a non-empty job id is required after submit; `max_in_flight`
   throttles concurrent array elements (SLURM `%N`); `marker_grace` absorbs
   shared-FS metadata lag; `scancel`/`qdel` cancellation hooks added.
+- **Scheduler scaling:** `max_array_size` splits a batch larger than the
+  scheduler's array-size cap (SLURM `MaxArraySize`, PBS `max_array_size`) into
+  sequential sub-arrays; the array manifest is tab-delimited so task/result paths
+  containing spaces survive the field split.
+- **Deterministic resume:** the Python/NumPy/torch RNG state is checkpointed and
+  restored (torch state stored as NumPy so the checkpoint unpickles without
+  torch), so a resumed run reproduces an uninterrupted run's spawn/training draws.
+- **Delta-checkpoint integrity:** each checkpoint records its delta chain
+  (`history_chain.json`); `reconstruct_history` loudly reports a broken chain (a
+  delta pruned/lost after the fact) instead of silently returning partial history.
 - **GPU binding on schedulers:** array tasks inherit the scheduler's
   `CUDA_VISIBLE_DEVICES` (via a `WalkerTask.device_index = -1` sentinel) instead
   of every task pinning to device 0; OpenMM degrades to CPU on any device-load

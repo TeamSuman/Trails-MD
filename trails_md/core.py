@@ -835,6 +835,8 @@ class TrailsMDCore:
             self.walker_parents = list(latest_entry.get("next_walker_parents") or [])
 
     def _checkpoint_state(self) -> dict[str, Any]:
+        from trails_md.utils.seeds import capture_rng_state
+
         return {
             "n_bins": list(self.config.n_bins),
             "voronoi_clusters": self.config.spawning.voronoi_clusters,
@@ -849,6 +851,8 @@ class TrailsMDCore:
             "feature_selection_indices": self.feature_selection_indices,
             "selected_feature_type": self.selected_feature_type,
             "retrain_controller": self.retrain_controller.state_dict(),
+            # RNG state so a resumed run reproduces an uninterrupted one's stream.
+            "rng_state": capture_rng_state(),
         }
 
     def _restore_sampler_state(self, state: dict[str, Any] | None) -> None:
@@ -873,6 +877,12 @@ class TrailsMDCore:
         self.retrain_controller.load_state_dict(state.get("retrain_controller", {}))
         if self.msm_monitor is not None and state.get("msm_monitor"):
             self.msm_monitor.load_state_dict(state["msm_monitor"])
+        # Restore the RNG stream last so it overrides the base seed set in
+        # __init__ — resumed spawn/training draws then match an uninterrupted run.
+        if state.get("rng_state") is not None:
+            from trails_md.utils.seeds import restore_rng_state
+
+            restore_rng_state(state["rng_state"])
 
     @staticmethod
     def _trajectory_file_problems(trajectories: list[str]) -> list[str]:

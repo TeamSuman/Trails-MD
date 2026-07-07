@@ -52,6 +52,83 @@ def test_slurm_array_directive_throttles_with_max_in_flight(tmp_path):
     assert any(line.endswith("--array=0-99") for line in plain)
 
 
+def test_render_script_uses_tab_delimited_manifest(tmp_path):
+    """cut must default to TAB so paths with spaces survive the field split."""
+    slurm = SlurmBackend()
+    script = slurm._render_script(3, tmp_path / "m.txt", tmp_path / "logs")
+    assert "cut -f1" in script and "cut -f2" in script
+    assert 'cut -d" "' not in script
+
+
+def _fake_scheduler_runner(submit_calls):
+    """A fake runner that executes each submitted manifest's tasks synchronously."""
+    from types import SimpleNamespace
+
+    import trails_md.execution.run_task as run_task
+
+    def runner(cmd, timeout):
+        if cmd[0] in ("sbatch", "qsub"):
+            submit_calls.append(cmd)
+            script = __import__("pathlib").Path(cmd[-1])
+            manifest = None
+            for line in script.read_text().splitlines():
+                if line.startswith("MANIFEST="):
+                    manifest = __import__("pathlib").Path(
+                        line.split("=", 1)[1].strip().strip('"')
+                    )
+            for entry in manifest.read_text().splitlines():
+                if entry.strip():
+                    task_pkl, result_json = entry.split("\t")
+                    run_task.main([task_pkl, result_json])
+            return SimpleNamespace(returncode=0, stdout="777", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")  # squeue: done
+
+    return runner
+
+
+def test_array_chunking_splits_large_batches(tmp_path):
+    """5 walkers with max_array_size=2 -> 3 sub-array submissions, all succeed."""
+    submit_calls: list = []
+    slurm = SlurmBackend(
+        command_runner=_fake_scheduler_runner(submit_calls),
+        sleep_fn=lambda s: None,
+        max_array_size=2,
+    )
+    (tmp_path / "iter_0").mkdir(parents=True, exist_ok=True)
+    # Register a trivial engine under a UNIQUE name (do not clobber the shared
+    # "fake" engine used by tests/test_execution.py).
+    from trails_md.engines.base import EngineFactory
+
+    class _OkEngine:
+        def __init__(self, **k):
+            pass
+
+        def prepare(self, **k):
+            pass
+
+        def run_production(self, traj_out, **k):
+            __import__("pathlib").Path(traj_out).write_bytes(b"x")
+            return True
+
+    EngineFactory.register("chunk_ok", _OkEngine)
+    tasks = [
+        WalkerTask(
+            index=i,
+            engine_name="chunk_ok",
+            engine_kwargs={},
+            prepare_kwargs={},
+            steps=10,
+            stride=1,
+            traj_out=str(tmp_path / "iter_0" / f"iteration_0_{i}.xtc"),
+            start_coords="ok",
+        )
+        for i in range(5)
+    ]
+    results = slurm.execute(tasks)
+    assert results == [True] * 5
+    assert len(submit_calls) == 3  # ceil(5/2) sub-arrays
+
+
 # ── Scheduler robustness ────────────────────────────────────────────────────
 def test_parse_walltime_seconds():
     assert parse_walltime_seconds("01:00:00") == 3600
@@ -131,6 +208,24 @@ def test_walker_task_device_index_defaults_to_scheduler_sentinel():
 
 
 # ── Checkpoint completeness gating ──────────────────────────────────────────
+def test_broken_delta_chain_is_reported_loudly(tmp_path, caplog):
+    import logging
+
+    from trails_md.checkpoints.manager import CheckpointManager
+
+    mgr = CheckpointManager(str(tmp_path))
+    mgr.save(0, None, {}, {}, {0: "a"})
+    mgr.save(1, None, {}, {}, {0: "a", 1: "b"})
+    mgr.save(2, None, {}, {}, {0: "a", 1: "b", 2: "c"})
+    # Simulate an operator pruning a middle checkpoint's delta after the fact.
+    (tmp_path / "iter_1" / "history.pkl").unlink()
+
+    with caplog.at_level(logging.ERROR):
+        _, _, _, full, _ = mgr.load(2)  # must not raise
+    assert any("chain is broken" in r.message for r in caplog.records)
+    assert 1 not in full  # the lost delta's key is genuinely absent (now flagged)
+
+
 def test_incomplete_checkpoint_is_ignored(tmp_path):
     from trails_md.checkpoints.manager import CheckpointManager
 
@@ -197,6 +292,40 @@ def test_encode_angles_sincos_is_continuous_across_pi():
 
 
 # ── Amber cold-start fix ────────────────────────────────────────────────────
+def test_rng_state_roundtrip_reproduces_stream():
+    """Capturing then restoring RNG state must reproduce subsequent draws."""
+    import random
+
+    from trails_md.utils.seeds import capture_rng_state, restore_rng_state
+
+    np.random.seed(123)
+    random.seed(123)
+    _ = np.random.rand(10)  # advance the stream (mimic completed iterations)
+    _ = [random.random() for _ in range(10)]
+
+    snapshot = capture_rng_state()
+    expected_np = np.random.rand(5)
+    expected_py = [random.random() for _ in range(5)]
+
+    # Simulate a crash + resume from a *different* base seed, then restore.
+    np.random.seed(999)
+    random.seed(999)
+    restore_rng_state(snapshot)
+    assert np.allclose(np.random.rand(5), expected_np)
+    assert [random.random() for _ in range(5)] == expected_py
+
+
+def test_rng_state_is_torch_independent_and_picklable():
+    import pickle
+
+    from trails_md.utils.seeds import capture_rng_state
+
+    snap = capture_rng_state()
+    # Must round-trip through pickle without requiring torch to unpickle.
+    reloaded = pickle.loads(pickle.dumps(snap))
+    assert "numpy" in reloaded and "python" in reloaded
+
+
 def test_amber_default_input_sets_tempi(tmp_path):
     from trails_md.engines.amber import AmberEngine
 
