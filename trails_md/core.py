@@ -488,6 +488,7 @@ class TrailsMDCore:
 
             if self.config.aggregate_memory:
                 self.feature_memory.append(features)
+                self._prune_feature_memory()
 
             # Train or update the Space Model (cadence decided by RetrainController)
             n_frames = self.config.spawning.step // self.config.spawning.stride
@@ -517,24 +518,9 @@ class TrailsMDCore:
                     )
 
                 if self.config.aggregate_memory:
-                    # Optimize: Cap memory to prevent O(N) deep learning slowdown
-                    max_frames = self.config.max_adaptive_memory_frames
-                    frames_per_iter = len(features)
-                    max_iters = max(5, max_frames // frames_per_iter)
-
-                    if len(self.feature_memory) > max_iters:
-                        import random
-
-                        # Keep initial state to anchor global space, random sample the rest
-                        sampled_memory = [self.feature_memory[0]]
-                        sampled_memory.extend(
-                            random.sample(self.feature_memory[1:], max_iters - 1)
-                        )
-                        fit_features = np.vstack(sampled_memory)
-                        total_walkers = len(sampled_memory) * len(walkers)
-                    else:
-                        fit_features = np.vstack(self.feature_memory)
-                        total_walkers = len(self.feature_memory) * len(walkers)
+                    self._prune_feature_memory()
+                    fit_features = np.vstack(self.feature_memory)
+                    total_walkers = len(self.feature_memory) * len(walkers)
                 else:
                     fit_features = features
                     total_walkers = len(walkers)
@@ -807,6 +793,28 @@ class TrailsMDCore:
             )
             entry["space_version"] = self.adaptive_space_version
 
+    def _prune_feature_memory(self) -> None:
+        """Cap feature memory size to prevent O(N) memory growth and slow training."""
+        if not getattr(self.config, "aggregate_memory", False) or not self.feature_memory:
+            return
+        max_frames = getattr(self.config, "max_adaptive_memory_frames", 50000)
+        first_len = len(self.feature_memory[0]) if len(self.feature_memory[0]) > 0 else 1
+        max_iters = max(5, max_frames // first_len)
+        if len(self.feature_memory) > max_iters:
+            import random
+
+            # Keep initial anchor (0), keep recent quarter, randomly sample middle
+            anchor = [self.feature_memory[0]]
+            n_recent = max(1, (max_iters - 1) // 4)
+            n_middle = (max_iters - 1) - n_recent
+            recent = self.feature_memory[-n_recent:]
+            middle_candidates = self.feature_memory[1:-n_recent] if n_middle > 0 else []
+            if len(middle_candidates) > n_middle:
+                middle = random.sample(middle_candidates, n_middle)
+            else:
+                middle = middle_candidates
+            self.feature_memory = anchor + middle + recent
+
     def _restore_feature_memory_from_history(self) -> None:
         """Rebuild adaptive feature memory from checkpointed history when possible."""
         if not is_adaptive_space(self.config.space_mode):
@@ -820,6 +828,7 @@ class TrailsMDCore:
             features = entry.get("features")
             if features is not None:
                 self.feature_memory.append(np.asarray(features, dtype=float))
+        self._prune_feature_memory()
 
         versions = [
             entry.get("space_version")
