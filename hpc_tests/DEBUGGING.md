@@ -55,6 +55,13 @@ the pydantic error. Common: bad `walltime`/`memory` format, negative resource,
 
 ## Result / run codes
 
+### `OUTDIR_EXISTS`
+The run output directory named on the `--outdir` you passed to
+`validate_results.py` does not exist. Either the run never started (read the tail
+of `run.log` — a `--check`/import failure aborts before any output), or the
+`--outdir` does not match the config's `outdir` (paths in the config are resolved
+relative to the config file). All other checks are skipped until this passes.
+
 ### `RESULT_MARKERS` (0 successful markers, scheduler backend)  ← highest-signal
 **Symptom:** the run reports every walker failed almost immediately, yet
 `squeue`/`qstat` showed the array actually running; trajectories may even exist.
@@ -105,6 +112,66 @@ The run stopped early. Read the *tail* of `run.log`:
 
 ---
 
+## Feature-test codes (opt-in checks from `run_local_matrix.py` / `--check-*`)
+
+These are emitted only when the corresponding feature check is requested (the
+feature matrix requests them automatically). See [`RUNBOOK.md`](RUNBOOK.md) §1.
+
+### `LATENT_DIM` (learned-CV runs)
+**Symptom:** the last `iter_*/cvs.npz` has a column count ≠ the configured
+`adaptive_model.latent_dim`. **Cause:** the CV model trained to the wrong
+dimension, or projection fell back to physical CVs. **Look at:**
+`trails_md/spaces/model.py` (`fit`/`project`) and the run's `space_mode`; confirm
+the learned backend is installed (`space_mode` needs `deeptime`/`torch`).
+
+### `MSM_NPZ` (in-loop MSM runs)
+**Symptom:** no `iter_*/msm.npz`, or its `timescales` are non-finite / its
+`transition_matrix` rows do not sum to 1. **Cause:** MSM estimation was skipped
+(cumulative frames `< msm.min_frames`), or the connected set had `< 2` states
+(sampling too sparse / lagtime too large). **Look at:** `run.log` for
+`MSM skipped …`/`MSM estimation failed …`, and `trails_md/msm/estimator.py`.
+Lower `msm.min_frames`/`msm.lagtime`/`msm.n_microstates` for a small smoke test.
+Note the in-loop MSM is **experimental** (see `docs/msm.md`).
+
+### `RESUME_CHAIN` (resume runs)
+**Symptom:** the delta-checkpoint chain does not reconstruct to a gapless history.
+**Cause:** a per-iteration `history.pkl` delta was lost/torn, so
+`reconstruct_history` reports a broken chain. **Look at:**
+`trails_md/checkpoints/manager.py` (`reconstruct_history`, `history_chain.json`)
+and whether the shared FS dropped a write. Not a resume *code* bug on its own —
+usually a missing/partial checkpoint dir.
+
+### `PATH_OUTPUT` (path reconstruction)
+**Symptom:** `trails-md-path` produced no or a zero-byte output trajectory.
+**Cause:** the requested start/end CVs share no recorded lineage, or MDAnalysis /
+`gmx` could not write frames. **Look at:** `trails_md/paths.py`
+(`connected_record_path`, `write_connected_trajectory`); confirm the endpoints
+fall within the sampled region and that MDAnalysis is installed (else set
+`TRAILS_MD_GMX`).
+
+### `GPU_BINDING` (per-walker GPU device isolation)
+Requested with `--check-gpu-binding` (the GPU feature runs and the GPU smoke
+scripts add it automatically). The OpenMM engine writes a `<trajectory>.gpu.json`
+marker per walker recording the *resolved* platform and device
+(`engines/openmm.py::_write_gpu_binding_marker`); the check reads them.
+**Fails when:**
+- **Any walker ran on CPU** while a GPU platform was requested — a bad device pin
+  silently degraded to CPU (`engines/openmm.py::_create_simulation` fallback).
+  Fix the device visibility / driver so the pin succeeds.
+- **Walkers piled onto one device** (`--gpu-count > 1` given, fewer distinct
+  devices used than `min(walkers, gpu-count)`) — the scheduler did not isolate a
+  GPU per task. On SLURM use `--gpus-per-task=1` **with** cgroup
+  `ConstrainDevices=yes`; on PBS many sites do not cgroup-isolate GPUs, so request
+  whole nodes or set `CUDA_VISIBLE_DEVICES` from the local rank in
+  `execution.module_loads`. Verify by reading `$OUTDIR/iter_*/*.gpu.json` (the raw
+  device each walker used) or the per-walker `logs_attempt*/*.out`.
+
+Without `--gpu-count` the check is report-only (it cannot tell a correct
+single-GPU node from missing isolation) but still fails on a CPU fallback and
+prints the device distribution.
+
+---
+
 ## Cross-cutting HPC symptoms (not tied to one code)
 
 ### The whole driver hangs for a long time, no progress
@@ -118,15 +185,21 @@ array's state and the reason (`--start`, `-f`).
 
 ### Submission rejected above ~1000 walkers (SLURM)
 `code`: `ARRAY_LIMIT`. SLURM `MaxArraySize` defaults to 1001 (max index 1000);
-PBS has a site `max_array_size`. Trails-MD submits one array element per walker
-with **no chunking** yet, so a single iteration with >MaxArraySize walkers is
-rejected. Mitigations today: keep `spawning.walker` under the site limit and use
-`execution.max_in_flight` to throttle concurrency; for very large fan-out see the
-roadmap item on array chunking / persistent worker pools in
-`docs/hpc_scaling.md`. Check your limit with `scontrol show config | grep -i
-MaxArraySize`.
+PBS has a site `max_array_size`. This caps a *single* array. Trails-MD splits a
+larger batch into sequential sub-arrays when you set `execution.max_array_size`
+below the site limit (`scheduler.py:_dispatch_attempt`), so an iteration with
+more walkers than the cap still submits — as several arrays. If you hit a
+rejection, either the batch exceeds the cap and `max_array_size` is unset/too
+high, or the value you set still exceeds the site limit. Check the limit with
+`scontrol show config | grep -i MaxArraySize` and set `execution.max_array_size`
+under it; also use `execution.max_in_flight` (`%N`) to throttle concurrency. For
+very large sustained fan-out see the persistent-worker-pool roadmap item in
+`docs/hpc_scaling.md`.
 
 ### GPU contention / all walkers on device 0 (`GPU_BINDING`)
+This is now validated automatically — see the `GPU_BINDING` feature-test code
+above for the `<traj>.gpu.json` markers and the pass/fail rules. The background
+below explains *why* isolation can fail and how to fix it at the site.
 **Symptom:** GPU test runs, but `nvidia-smi` shows all walkers on one GPU while
 others idle (throughput ~1/Nth of expected).
 **Root behaviour:** on the scheduler path each walker inherits the GPU the
@@ -148,10 +221,12 @@ instead of crashing — see `engines/openmm.py:_create_simulation`).
 
 ### PBS array job rejected or `PBS_ARRAY_INDEX: unbound variable` (`PBS_FLAVOR`)
 The PBS backend targets **OpenPBS / PBS Pro** (`#PBS -J`, `PBS_ARRAY_INDEX`).
-Classic **Torque** uses `#PBS -t` and `PBS_ARRAYID` and will fail. Confirm your
-flavor with `qstat --version`. If you are on Torque, this backend needs a Torque
-variant (see roadmap); as a stopgap, use the `local` backend within a single
-large multi-GPU allocation.
+Classic **Torque** uses `#PBS -t` and `PBS_ARRAYID` and will fail. `preflight.py
+--scheduler pbs` now auto-detects this (the `pbs_flavor` check warns on Torque),
+so run preflight first. If you are on Torque, this backend needs a Torque variant
+(see roadmap); as a stopgap, use the **`local` backend within a single large
+multi-node/GPU allocation** — set `execution.backend: local` and
+`spawning.max_workers` to the number of GPU/CPU slots in the allocation.
 
 ### Poll commands time out under load
 At scale, `squeue`/`qstat` can exceed `execution.submit_timeout`. The poller now
@@ -160,9 +235,13 @@ catches the timeout and retries on the next cycle instead of crashing
 and `poll_interval` to reduce scheduler query pressure.
 
 ### Manifest / path parsing breaks
-If `outdir` (or any resolved path) contains **spaces**, the array script's
-`cut -d" "` manifest split mangles the task/result paths and all walkers fail.
-Use a space-free `outdir`. (Roadmap: switch the manifest to a NUL/tab delimiter.)
+The array-job manifest is **TAB-delimited** and split with `cut -f1`/`cut -f2`
+(`scheduler.py:_render_script`), so task/result paths containing spaces survive.
+If walkers still fail on path parsing, confirm the rendered `submit_*.sh` under
+`<outdir>/iter_*/_jobs/` uses `cut -f` (not `cut -d" "`) and that a literal TAB
+separates the two columns of `manifest_*.txt`; a shell that rewrites TABs (rare)
+or an edited script could reintroduce the problem. A space-free `outdir` remains
+the safest choice regardless.
 
 ---
 

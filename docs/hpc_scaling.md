@@ -23,7 +23,10 @@ Costs at large fan-out:
 - **Per-iteration submit/poll latency.** Every iteration pays a submit + queue +
   poll cycle. With short walkers this overhead can dominate.
 - **Array-size ceilings.** SLURM `MaxArraySize` (default 1001) and PBS
-  `max_array_size` cap walkers-per-iteration; there is no chunking yet.
+  `max_array_size` cap the elements in a *single* array. Trails-MD splits a
+  larger batch into sequential sub-arrays when you set `execution.max_array_size`
+  (it does not auto-detect the site limit), so walkers-per-iteration can exceed
+  the cap — at the cost of multiple submit/poll cycles per iteration.
 - **Metadata pressure.** Thousands of small `*.pkl` / `result_*.json` / `.out` /
   `.err` files per campaign stress Lustre/GPFS metadata servers.
 - **Coarse accounting.** Completion is inferred from marker files and a queue
@@ -56,7 +59,7 @@ Sources:
 | --- | --- | --- |
 | Setup simplicity | **Better** — no daemons/ports, portable, testable off-cluster | Heavier (master + workers, TCP ports) |
 | Per-iteration overhead | Worse — submit+poll every iteration | **Better** — pool amortized over whole run |
-| Max walkers/iteration | Worse — capped by `MaxArraySize`, no chunking | **Better** — pool size independent of batch |
+| Max walkers/iteration | Comparable — `max_array_size` chunking clears `MaxArraySize`, but each sub-array is a fresh submit | **Better** — pool size independent of batch |
 | Dead-worker detection | Worse — inferred from missing markers | **Better** — heartbeats + task timeouts |
 | Storage footprint | Worse — thousands of small files | **Better** — one HDF5 file |
 | Locked-down clusters (no open ports) | **Better** — filesystem-only | Worse — needs socket connectivity |
@@ -75,10 +78,11 @@ better on overhead, scale ceilings, and failure detection.
    use an `mpi4py`/MPI backend (ubiquitous on HPC, no open ports) or a ZeroMQ
    backend behind the existing `ExecutionBackend` interface. This removes
    per-iteration submit latency and the array-size ceiling in one move.
-2. **Array chunking + `%N` throttling.** Until (1) lands, split batches larger
-   than `MaxArraySize` into multiple arrays and keep the `execution.max_in_flight`
-   (`%N`) cap. Query the site limit (`scontrol show config`) and chunk
-   automatically.
+2. **Auto-detect the array-size limit.** Array chunking
+   (`execution.max_array_size`) and `%N` throttling (`execution.max_in_flight`)
+   are implemented; what remains is querying the site limit automatically
+   (`scontrol show config | grep MaxArraySize`, PBS `max_array_size`) so the user
+   need not set `max_array_size` by hand.
 3. **Task-level heartbeats/timeouts.** Even in the array model, have `run_task`
    emit periodic heartbeat files (or use `sacct`/`qstat -f` exit codes) so a
    hung or silently-killed walker is detected before `wait_timeout`.
@@ -86,8 +90,9 @@ better on overhead, scale ceilings, and failure detection.
    (per-iteration trajectories/markers/pickles) with an HDF5/Zarr store to kill
    metadata-server pressure and make provenance a single artifact — closer to
    WESTPA's `west.h5`.
-5. **Delimiter-safe manifests + `#PBS -V`.** Switch the manifest to a NUL/tab
-   delimiter (space-safe paths) and export the submit environment on PBS.
+5. **Export the submit environment on PBS.** The manifest is already TAB-delimited
+   (space-safe task/result paths, split with `cut -f`); what remains is making it
+   easy to export the submit environment on PBS (e.g. `extra_directives: ["#PBS -V"]`).
 6. **Torque flavor.** Add a `-t` / `PBS_ARRAYID` variant so classic Torque sites
    are supported alongside OpenPBS/PBS Pro.
 

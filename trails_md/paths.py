@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -125,7 +126,9 @@ def map_global_frame(records: list[dict[str, Any]], index: int) -> dict[str, Any
     return records[index]
 
 
-def load_history(run_dir: Path, checkpoint: int | None = None) -> dict[int, Any]:
+def load_history(
+    run_dir: Path, checkpoint: int | None = None, ignore_missing: bool = False
+) -> dict[int, Any]:
     from trails_md.checkpoints.manager import reconstruct_history
 
     checkpoint_root = run_dir / "checkpoints"
@@ -148,7 +151,7 @@ def load_history(run_dir: Path, checkpoint: int | None = None) -> dict[int, Any]
     # History is delta-checkpointed: each iter_*/history.pkl holds only the
     # entries since the previous checkpoint. Merge them back into the full
     # history (otherwise the lineage/path tools see only the last window).
-    return reconstruct_history(checkpoint_root, target)
+    return reconstruct_history(checkpoint_root, target, ignore_missing=ignore_missing)
 
 
 def history_records(history: dict[int, Any]) -> list[FrameRef]:
@@ -288,12 +291,14 @@ def _write_connected_trajectory_with_gromacs(
 
     gmx = shutil.which("gmx")
     if gmx is None:
-        fallback = Path("/home/dm/Soft/GMX26/bin/gmx")
-        if fallback.exists():
-            gmx = str(fallback)
+        # Allow an explicit override for sites where gmx is not on PATH.
+        override = os.environ.get("TRAILS_MD_GMX")
+        if override and Path(override).exists():
+            gmx = override
     if gmx is None:
         raise ImportError(
-            "MDAnalysis is not installed and no GROMACS 'gmx' executable was found."
+            "MDAnalysis is not installed and no GROMACS 'gmx' executable was found. "
+            "Install MDAnalysis, put 'gmx' on PATH, or set TRAILS_MD_GMX to its path."
         )
 
     output = Path(output)

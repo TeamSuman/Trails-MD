@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+#PBS -N trails-features
+#PBS -l walltime=03:00:00
+#PBS -l select=1:ncpus=2:mem=8gb
+#PBS -j oe
+#
+# Driver job: run the full Trails-MD FEATURE MATRIX on PBS (OpenPBS / PBS Pro).
+# Each feature's walkers are dispatched as a PBS array job
+# (execution.backend=pbs). Cluster counterpart of
+#   python hpc_tests/run_local_matrix.py            (local backend)
+#
+# EDIT the SITE SETUP block and the TRAILS_HPC_* resource vars, then:
+#   qsub hpc_tests/pbs/run_features.pbs
+set -uo pipefail
+
+# =========================== SITE SETUP (EDIT) ===============================
+# module load anaconda3
+# source "$(conda info --base)/etc/profile.d/conda.sh"
+# conda activate trails-md
+# On many PBS sites, export the submit env to the array jobs with:
+#   export TRAILS_HPC_MODULES="module load anaconda3"   and/or  #PBS -V
+#
+# This backend needs PBS Pro / OpenPBS (-J arrays). On classic Torque, use the
+# `local` backend inside one allocation instead (see DEBUGGING.md CODE=PBS_FLAVOR).
+# =============================================================================
+
+REPO_ROOT="${PBS_O_WORKDIR:-$(pwd)}"
+cd "$REPO_ROOT"
+
+export TRAILS_HPC_PARTITION="${TRAILS_HPC_PARTITION:-}"   # PBS queue
+export TRAILS_HPC_ACCOUNT="${TRAILS_HPC_ACCOUNT:-}"
+export TRAILS_HPC_WALLTIME="${TRAILS_HPC_WALLTIME:-00:20:00}"
+export TRAILS_HPC_CPUS="${TRAILS_HPC_CPUS:-2}"
+export TRAILS_HPC_GPUS="${TRAILS_HPC_GPUS:-0}"
+export TRAILS_HPC_GPU_COUNT="${TRAILS_HPC_GPU_COUNT:-}"   # distinct GPUs available; enforces walker spread
+export TRAILS_HPC_MODULES="${TRAILS_HPC_MODULES:-}"
+
+RESULTS="${RESULTS:-results/pbs_features}"
+ONLY_ARGS=""
+for f in ${ONLY:-}; do ONLY_ARGS="$ONLY_ARGS --only $f"; done
+
+python hpc_tests/run_local_matrix.py --backend pbs \
+    --results-dir "$RESULTS" $ONLY_ARGS
+RC=$?
+echo "Feature matrix finished (rc=$RC). Reports under $RESULTS/ ; see hpc_tests/RUNBOOK.md."
+exit $RC

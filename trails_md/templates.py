@@ -67,6 +67,8 @@ spawning:
 # space_mode: fixed | pca | tica | tvae | vampnet | spib | deep-tica | deep-lda
 space_mode: vampnet
 adaptive_feature_type: distances        # distances | fitted_coords | phi_psi (AIB9-only)
+# adaptive_angle_encoding: sincos       # raw | sincos — for phi_psi features, embed
+                                        # dihedrals as [sin, cos] so they aren't torn at ±pi
 retrain_freq: 5                         # retrain cadence for retrain_policy: fixed
 retrain_policy: fixed                   # fixed | vamp_adaptive (retrain on VAMP-2 drop)
 # vamp_retrain_tol: 0.1                 # relative VAMP-2 drop that triggers a retrain
@@ -144,13 +146,20 @@ execution:
   # gpus_per_task: 1
   # memory: "16G"
   # max_retries: 2
+  # max_in_flight: 64                    # cap concurrent array elements (SLURM `%N`)
+  # max_array_size: 1000                 # split larger batches into sequential sub-arrays
+  # marker_grace: 30                     # tolerate shared-FS metadata lag (seconds)
+  # wait_timeout: null                   # ceiling on waiting for one array job; null = derive from walltime
   # module_loads:
   #   - "module load cuda/12.2"
+  # extra_directives:                    # raw scheduler lines (e.g. GPU gres / QoS)
+  #   - "#SBATCH --gres=gpu:1"
 
 # ---- Run-level settings ----------------------------------------------------
 outdir: runs/my_run
-random_seed: 42
+random_seed: 42                         # base seed; per-walker seeds derive from it deterministically
 checkpoint_freq: 1
+# min_success_fraction: 1.0             # HPC: continue an iteration if >= this fraction of walkers succeed
 save_features: true
 n_bins: [30, 30]                        # binning for coverage / fixed-space grid
 # min_values: [-3.14159, -3.14159]      # fixed-space bounds (space_mode: fixed)

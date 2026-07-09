@@ -43,7 +43,7 @@ def parse_walltime_seconds(walltime: str) -> float | None:
     """Best-effort conversion of a scheduler walltime string to seconds.
 
     Accepts ``HH:MM:SS``, ``MM:SS``, ``D-HH:MM:SS`` (SLURM), or a bare integer
-    number of seconds/minutes. Returns ``None`` when the format is not
+    number of minutes (SLURM convention). Returns ``None`` when the format is not
     recognised, so callers can fall back to an unbounded wait.
     """
     if not walltime:
@@ -66,7 +66,7 @@ def parse_walltime_seconds(walltime: str) -> float | None:
     elif len(nums) == 2:
         h, m, s = 0, nums[0], nums[1]
     elif len(nums) == 1:
-        h, m, s = 0, 0, nums[0]
+        h, m, s = 0, nums[0], 0  # Bare integer in SLURM is minutes
     else:
         return None
     return days * 86400 + h * 3600 + m * 60 + s

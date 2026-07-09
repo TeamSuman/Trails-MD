@@ -124,6 +124,7 @@ class VoronoiBinner:
         periodic: bool = False,
         grid_size: int = 250,
         padding: float = 0.1,
+        seed: int = 42,
     ):
         self.n_clusters = int(n_clusters)
         if self.n_clusters <= 0:
@@ -134,6 +135,8 @@ class VoronoiBinner:
         self.periodic = periodic
         self.grid_size = int(grid_size)
         self.padding = padding
+        self.seed = int(seed)
+        self.rng = np.random.default_rng(self.seed)
 
     def fit(self, points: np.ndarray) -> BinTable:
         points = self._as_2d(points)
@@ -157,14 +160,14 @@ class VoronoiBinner:
                 # Downsample to a maximum of max(10000, 20*n_clusters) for fast fitting
                 max_samples = max(10000, 20 * self.n_clusters)
                 if len(points) > max_samples:
-                    idx = np.random.choice(len(points), max_samples, replace=False)
+                    idx = self.rng.choice(len(points), max_samples, replace=False)
                     fit_points = points[idx]
                 else:
                     fit_points = points
 
                 model = MiniBatchKMeans(
                     n_clusters=self.n_clusters,
-                    random_state=0,
+                    random_state=self.seed,
                     n_init=1,
                     batch_size=max(1024, 3 * self.n_clusters),
                 )

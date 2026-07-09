@@ -16,6 +16,15 @@ set -uo pipefail
 # source "$(conda info --base)/etc/profile.d/conda.sh"
 # conda activate trails-md
 # Mirror these in the config's execution.module_loads (or add "#PBS -V").
+#
+# NOTE: this backend targets PBS Pro / OpenPBS (#PBS -J arrays). On classic
+# Torque (#PBS -t / PBS_ARRAYID) it will not work — run the `local` backend
+# inside one allocation instead (preflight flags the flavor; see DEBUGGING.md).
+#
+# Choosing the MD engine: OpenMM is used here. For GROMACS/Amber, `module load`
+# the engine (here and in the config's execution.module_loads), then set
+# engine.gromacs_executable / engine.amber_executable (name on PATH or absolute
+# path) and, for GROMACS, engine.gromacs_include_dir in the config.
 # =============================================================================
 
 REPO_ROOT="${PBS_O_WORKDIR:-$(pwd)}"
@@ -23,6 +32,7 @@ cd "$REPO_ROOT"
 CONFIG="${CONFIG:-hpc_tests/configs/alad_gpu_pbs.yaml}"
 ITERATIONS="${ITERATIONS:-3}"
 WALKERS="${WALKERS:-8}"
+GPU_COUNT="${GPU_COUNT:-}"          # distinct GPUs available; set to enforce walker spread
 RESULTS="${RESULTS:-results/pbs_gpu}"
 mkdir -p "$RESULTS"
 
@@ -50,8 +60,10 @@ PY
 )
 python hpc_tests/checks/validate_results.py --outdir "$OUTDIR" \
     --expect-iterations "$ITERATIONS" --expect-walkers "$WALKERS" \
-    --engine openmm --out "$RESULTS/validate.json"
+    --engine openmm --check-gpu-binding ${GPU_COUNT:+--gpu-count "$GPU_COUNT"} \
+    --out "$RESULTS/validate.json"
 VAL_RC=$?
 echo "SUMMARY: run_rc=$RUN_RC validate_rc=$VAL_RC results in $RESULTS/"
-echo "Tip: inspect $OUTDIR/iter_*/_jobs/logs_attempt*/ for per-walker CUDA device lines."
+# GPU_BINDING is validated automatically from per-walker <traj>.gpu.json markers.
+# Raw device per walker: $OUTDIR/iter_*/*.gpu.json and $OUTDIR/iter_*/_jobs/logs_attempt*/.
 exit $(( RUN_RC != 0 || VAL_RC != 0 ))

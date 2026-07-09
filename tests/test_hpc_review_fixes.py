@@ -134,8 +134,10 @@ def test_parse_walltime_seconds():
     assert parse_walltime_seconds("01:00:00") == 3600
     assert parse_walltime_seconds("02:30:00") == 2 * 3600 + 30 * 60
     assert parse_walltime_seconds("30:00") == 30 * 60  # MM:SS
+    assert parse_walltime_seconds("60") == 60 * 60  # bare integer is minutes in SLURM
     assert parse_walltime_seconds("1-00:00:00") == 86400  # SLURM D-HH:MM:SS
     assert parse_walltime_seconds("nonsense") is None
+
 
 
 def test_scheduler_cancels_and_returns_on_wait_timeout():
@@ -210,6 +212,7 @@ def test_walker_task_device_index_defaults_to_scheduler_sentinel():
 # ── Checkpoint completeness gating ──────────────────────────────────────────
 def test_broken_delta_chain_is_reported_loudly(tmp_path, caplog):
     import logging
+    import pytest
 
     from trails_md.checkpoints.manager import CheckpointManager
 
@@ -220,8 +223,11 @@ def test_broken_delta_chain_is_reported_loudly(tmp_path, caplog):
     # Simulate an operator pruning a middle checkpoint's delta after the fact.
     (tmp_path / "iter_1" / "history.pkl").unlink()
 
+    with pytest.raises(RuntimeError):
+        mgr.load(2)  # must raise by default when chain is broken
+
     with caplog.at_level(logging.ERROR):
-        _, _, _, full, _ = mgr.load(2)  # must not raise
+        _, _, _, full, _ = mgr.load(2, ignore_missing_history=True)
     assert any("chain is broken" in r.message for r in caplog.records)
     assert 1 not in full  # the lost delta's key is genuinely absent (now flagged)
 
@@ -335,3 +341,38 @@ def test_amber_default_input_sets_tempi(tmp_path):
     text = out.read_text()
     assert "tempi=310.00" in text  # velocities generated at the target T, not 0 K
     assert "temp0=310.00" in text
+
+
+def test_engine_seeding(tmp_path):
+    from trails_md.engines.amber import AmberEngine
+    from trails_md.engines.gromacs import GromacsEngine
+
+    gmx = GromacsEngine(temperature=300.0, seed=12345)
+    gmx_out = tmp_path / "gromacs.mdp"
+    gmx._write_mdp(str(gmx_out), steps=100, stride=10)
+    assert "gen_seed                = 12345" in gmx_out.read_text()
+
+    amber = AmberEngine(temperature=300.0, seed=54321)
+    amber_out = tmp_path / "amber.in"
+    amber._write_input(str(amber_out), steps=100, stride=10, trajectory_format="netcdf")
+    assert "ig=54321," in amber_out.read_text()
+
+
+def test_per_walker_task_seeding(tmp_path):
+    from trails_md.execution.base import build_walker_tasks
+
+    tasks = build_walker_tasks(
+        engine_name="openmm",
+        engine_kwargs={"seed": 42},
+        prepare_kwargs={},
+        steps=100,
+        stride=10,
+        outdir=tmp_path,
+        iteration=2,
+        walkers=["coord1.pdb", "coord2.pdb", "coord3.pdb"],
+    )
+    seeds = [t.engine_kwargs.get("seed") for t in tasks]
+    assert len(seeds) == 3
+    assert len(set(seeds)) == 3  # all unique
+    assert all(isinstance(s, int) and s > 0 for s in seeds)
+

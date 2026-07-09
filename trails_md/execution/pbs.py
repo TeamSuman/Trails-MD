@@ -10,6 +10,7 @@ from .scheduler import SchedulerBackend
 
 class PBSBackend(SchedulerBackend):
     array_index_var = "PBS_ARRAY_INDEX"
+    array_flag = "-J"
 
     def _directives(self, n_tasks: int, logdir: Path) -> list[str]:
         select = f"select=1:ncpus={self.cpus_per_task}"
@@ -19,7 +20,8 @@ class PBSBackend(SchedulerBackend):
             select += f":mem={self.memory}"
         d = [
             f"#PBS -N {self.job_name}",
-            f"#PBS -J 0-{n_tasks - 1}",
+            "#PBS -V",
+            f"#PBS {self.array_flag} 0-{n_tasks - 1}",
             f"#PBS -l {select}",
             f"#PBS -l walltime={self.walltime}",
             f"#PBS -o {logdir}/",
@@ -60,4 +62,13 @@ class PBSBackend(SchedulerBackend):
         return active
 
 
+class TorqueBackend(PBSBackend):
+    """Torque / older PBS array-job execution backend."""
+
+    array_index_var = "PBS_ARRAYID"
+    array_flag = "-t"
+
+
 ExecutionBackendFactory.register("pbs", PBSBackend)
+ExecutionBackendFactory.register("torque", TorqueBackend)
+

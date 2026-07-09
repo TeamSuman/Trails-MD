@@ -61,14 +61,15 @@ def _complete_checkpoint_iters(checkpoint_root: Path) -> list[int]:
     )
 
 
-def reconstruct_history(checkpoint_root: Path, iteration: int) -> dict[Any, Any]:
+def reconstruct_history(
+    checkpoint_root: Path, iteration: int, ignore_missing: bool = False
+) -> dict[Any, Any]:
     """Merge the per-checkpoint delta ``history.pkl`` files (for all iterations
     ``<= iteration``) into the full cumulative history.
 
     Each key normally lives in exactly one delta; on overlap the newer checkpoint
-    wins. Incomplete (torn) checkpoint directories and unreadable deltas
-    (truncated by a crash) are skipped with a warning rather than aborting the
-    whole restore.
+    wins. If required deltas are missing or unreadable, raises RuntimeError
+    unless ``ignore_missing=True`` is passed.
     """
     iters = [it for it in _complete_checkpoint_iters(checkpoint_root) if it <= iteration]
 
@@ -87,13 +88,15 @@ def reconstruct_history(checkpoint_root: Path, iteration: int) -> dict[Any, Any]
             if not (checkpoint_root / f"iter_{r}" / "history.pkl").exists()
         ]
         if missing:
-            logging.error(
-                "Delta-checkpoint history chain is broken: history deltas for "
-                "iteration(s) %s are missing (pruned or lost). The reconstructed "
-                "history will be INCOMPLETE and lineage/MSM over those iterations "
-                "is unreliable — resume from a self-contained/earlier checkpoint.",
-                missing,
+            msg = (
+                f"Delta-checkpoint history chain is broken: history deltas for "
+                f"iteration(s) {missing} are missing (pruned or lost). The reconstructed "
+                f"history would be INCOMPLETE and lineage/MSM over those iterations "
+                f"is unreliable — resume from a self-contained/earlier checkpoint or pass ignore_missing=True."
             )
+            if not ignore_missing:
+                raise RuntimeError(msg)
+            logging.error(msg)
 
     full: dict[Any, Any] = {}
     for it in iters:
@@ -104,6 +107,9 @@ def reconstruct_history(checkpoint_root: Path, iteration: int) -> dict[Any, Any]
             with open(hist_file, "rb") as handle:
                 part = pickle.load(handle)
         except Exception as exc:  # noqa: BLE001 - tolerate a corrupt delta
+            msg = f"Unreadable history delta {hist_file}: {exc}"
+            if not ignore_missing:
+                raise RuntimeError(msg) from exc
             logging.warning("Skipping unreadable history delta %s: %s", hist_file, exc)
             continue
         if isinstance(part, dict):
@@ -185,7 +191,10 @@ class CheckpointManager:
         os.replace(tmp, iter_dir / "format_version")
 
     def load(
-        self, iteration: int, space_model: Any = None
+        self,
+        iteration: int,
+        space_model: Any = None,
+        ignore_missing_history: bool = False,
     ) -> tuple[Any, Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
         """Restore the state exactly as it was at the specified iteration."""
         iter_dir = self.checkpoint_dir / f"iter_{iteration}"
@@ -237,7 +246,9 @@ class CheckpointManager:
         with open(iter_dir / "bin_state.pkl", "rb") as f:
             bin_state = pickle.load(f)
 
-        history = reconstruct_history(self.checkpoint_dir, iteration)
+        history = reconstruct_history(
+            self.checkpoint_dir, iteration, ignore_missing=ignore_missing_history
+        )
 
         state_path = iter_dir / "sampler_state.pkl"
         if state_path.exists():

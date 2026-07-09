@@ -54,3 +54,28 @@ def test_same_seed_gives_identical_vampnet_projection():
         return np.asarray(m.project(feats))
 
     np.testing.assert_allclose(project(), project(), rtol=1e-5, atol=1e-5)
+
+
+def test_spawner_rng_checkpoint_continuation():
+    from trails_md.spawners.base import SpawnerFactory
+
+    # Generate test point cloud
+    points = np.random.default_rng(123).normal(0, 1, (100, 2))
+
+    # Instantiate spawner with a specific seed
+    spawner1 = SpawnerFactory.get("density", seed=999)
+    res1 = spawner1.sample(points, top_n=5)
+    
+    # Save checkpoint state after first sample
+    state = spawner1.state_dict()
+    res2 = spawner1.sample(points, top_n=5)
+
+    # Instantiate a fresh spawner, load state, and sample
+    spawner2 = SpawnerFactory.get("density", seed=999)
+    spawner2.load_state_dict(state)
+    res2_restored = spawner2.sample(points, top_n=5)
+
+    assert res2 == res2_restored
+    # Check that sampling advances the RNG state (res1 and res2 should differ on average)
+    assert res1 != res2
+

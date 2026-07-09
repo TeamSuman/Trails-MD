@@ -152,6 +152,7 @@ class AmberEngine(MDEngine):
         self.amber_extra_args = list(amber_extra_args or [])
         self.amber_trajectory_format = amber_trajectory_format.lower()
         self._resolved_trajectory_format()
+        self.seed: int | None = kwargs.get("seed", None)
 
         # Set after prepare()
         self.topology_file: Path | None = None
@@ -431,7 +432,7 @@ class AmberEngine(MDEngine):
                 # GROMACS both start at the target temperature.
                 f"  tempi={self.temperature:.2f}, temp0={self.temperature:.2f},\n"
                 f"  ntt=3, gamma_ln=1.0,\n"
-                f"  ig=-1,\n"
+                f"  ig={-1 if self.seed is None else self.seed},\n"
                 f"  ntb={ntb}, ntp={ntp},{pres_line}\n"
                 f"  cut=9.0,\n"
                 f"  ntpr={steps}, ntwx={stride}, iwrap=1,\n"

@@ -21,6 +21,12 @@ class SeedManager:
 
     def __init__(self, seed: int):
         self.seed = seed
+        # Instance-bound generator for core sampling draws (initial-walker
+        # replication, feature-memory pruning). Kept separate from the global
+        # ``random``/``np.random`` streams so those draws cannot be desynchronised
+        # by an external library seeding or consuming the global RNG; its state is
+        # checkpointed by the core for deterministic resume.
+        self.rng = np.random.default_rng(seed)
 
     def set_seed(self) -> None:
         """Initialise random seeds globally across all relevant backends."""

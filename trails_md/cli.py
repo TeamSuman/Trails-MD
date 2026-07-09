@@ -61,6 +61,7 @@ def run(
     config: dict[str, Any],
     iterations: int,
     resume: str | int | None = None,
+    ignore_missing_history: bool = False,
 ) -> tuple[Path, int]:
     from trails_md.core import TrailsMDCore
 
@@ -70,11 +71,12 @@ def run(
 
     if resume is not None:
         checkpoint_iteration = (
-            sampler.latest_checkpoint_iteration()
-            if resume == "latest"
-            else int(resume)
+            sampler.latest_checkpoint_iteration() if resume == "latest" else int(resume)
         )
-        sampler.restore_checkpoint(checkpoint_iteration)
+        sampler.restore_checkpoint(
+            checkpoint_iteration,
+            ignore_missing_history=ignore_missing_history,
+        )
         walkers = sampler.resume_walkers()
         print(
             "Resumed from checkpoint "
@@ -95,6 +97,27 @@ def run(
         if result.get("converged"):
             print(f"Converged: {result.get('convergence_reason')}")
             break
+
+    # Persist a machine-readable campaign outcome next to the outputs so tooling
+    # (validators, analysis, an HPC agent benchmarking convergence) does not have
+    # to scrape the driver log. Written for every backend since cli.run is the
+    # single campaign entry point.
+    import json
+
+    try:
+        (sampler.outdir / "convergence.json").write_text(
+            json.dumps(
+                {
+                    "converged": bool(getattr(sampler, "converged", False)),
+                    "convergence_reason": getattr(sampler, "convergence_reason", None),
+                    "completed_iterations": completed_iterations,
+                    "requested_iterations": iterations,
+                },
+                indent=2,
+            )
+        )
+    except OSError as exc:
+        logging.warning("Could not write convergence.json: %s", exc)
 
     return sampler.outdir, completed_iterations
 
@@ -125,6 +148,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Resume from a checkpoint. Use --resume for the latest checkpoint "
             "or --resume N for checkpoints/iter_N."
         ),
+    )
+    parser.add_argument(
+        "--ignore-missing-history",
+        action="store_true",
+        help="Ignore missing or unreadable history deltas when restoring a checkpoint.",
     )
     parser.add_argument(
         "--check",
@@ -173,6 +201,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             config,
             args.iterations,
             resume=args.resume,
+            ignore_missing_history=args.ignore_missing_history,
         )
     except (FileNotFoundError, ImportError, RuntimeError, ValueError) as exc:
         raise SystemExit(f"ERROR: {exc}") from None

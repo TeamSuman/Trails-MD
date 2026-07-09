@@ -12,6 +12,44 @@ adds first-class **HPC scalability** and **VAMP-2 feature optimisation**. It als
 adds a flux-weighted **transition-matrix convergence** gate with
 **uncertainty-guided spawning**, and opt-in **landscape-adaptive binning**.
 
+### Correctness review & HPC feature-test expansion (this pass)
+
+Fixes from a fresh scientific/HPC review, plus a broadened HPC validation suite.
+
+- **MSM segmentation (critical, silent):** `_collect_msm_trajectories` sliced the
+  cumulative projection by a constant `step//stride`, which crosses walker
+  boundaries for GROMACS (which writes the `t=0` frame, `step//stride + 1` frames)
+  and any variable-length walker — injecting spurious inter-walker transitions
+  into the MSM count matrix. It now segments by the stored per-walker frame
+  records (exact counts) and ignores lower-dimensional projections.
+- **Spawner ↔ frame-record misalignment (critical, silent):** the spawner pooled
+  historical frames filtered by projection dimension while the core built the
+  trajectory/frame-record lists unfiltered, so a spawn index could resolve to the
+  wrong conformation when history mixed dimensionalities (e.g. a 2-D
+  initial-trajectory injection alongside an n-D adaptive space). A single shared
+  `pooled_history_iterations` helper now drives both, keeping them index-synced;
+  occupancy tracking gained the same dimension guard.
+- **Reproducibility:** core sampling draws (initial-walker replication,
+  feature-memory pruning) moved off the global `random` module to an
+  instance-bound generator on `SeedManager`, checkpointed for deterministic resume.
+- **HPC oversubscription:** GROMACS `mdrun -ntomp` and the OpenMM CPU platform's
+  thread count are derived from the walker's CPU allocation
+  (`OMP_NUM_THREADS`/`SLURM_CPUS_PER_TASK`/`OPENMM_CPU_THREADS`) when not set
+  explicitly; OpenMM OpenCL/HIP now get per-device isolation (not just CUDA).
+- **GROMACS scratch hygiene:** `grompp`/`mdrun` no longer leave `mdout.mdp` /
+  `state.cpt` / `state_prev.cpt` in the process working directory (the submit dir
+  on HPC); they are redirected into the per-walker workdir and cleaned up.
+- **HPC test suite:** expanded from OpenMM+fixed+density to a broad feature matrix
+  (engines, spawners, learned CVs, MSM, feature selection, adaptive binning,
+  resume, path reconstruction) with a **local-backend mirror** runner
+  (`hpc_tests/run_local_matrix.sh`) so features can be validated off-cluster,
+  feature-aware result validators, and a `RUNBOOK.md`.
+- **Docs:** corrected `docs/cli.md` (`--log-level` default `WARNING`, `--config`
+  default, `--ignore-missing-history`, `trails-md-path` batch flags) and stale
+  "no chunking / space-unsafe manifest" claims in `docs/hpc_scaling.md` and
+  `hpc_tests/DEBUGGING.md` (array chunking and the TAB-delimited manifest are
+  implemented). Removed a hardcoded developer `gmx` path (now `TRAILS_MD_GMX`).
+
 ### HPC-scale review & hardening (this pass)
 
 Fixes and features from a code-review pass focused on large-scale atomistic MD on

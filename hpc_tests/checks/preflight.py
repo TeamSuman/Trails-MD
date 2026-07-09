@@ -71,6 +71,43 @@ def check_scheduler(scheduler: str) -> dict:
     }
 
 
+def check_pbs_flavor() -> dict:
+    """Distinguish PBS Pro / OpenPBS from classic Torque.
+
+    The PBS array backend targets PBS Pro / OpenPBS (``#PBS -J``,
+    ``PBS_ARRAY_INDEX``). Classic **Torque** uses ``#PBS -t`` / ``PBS_ARRAYID``
+    and is *not* supported — on Torque, run the ``local`` backend inside one
+    multi-node/GPU allocation instead. This probe warns (never hard-fails) so a
+    Torque site is caught before wasting a submission.
+    """
+    rc, out = _run(["qstat", "--version"])
+    text = out.lower()
+    if "torque" in text:
+        flavor, supported = "torque", False
+    elif any(tok in text for tok in ("pbspro", "pbs pro", "openpbs", "pbs_version")):
+        flavor, supported = "pbspro_or_openpbs", True
+    else:
+        flavor, supported = "unknown", None
+    notes = {
+        False: "Classic Torque (-t / PBS_ARRAYID) is NOT supported by the pbs array "
+        "backend; use the `local` backend inside one allocation "
+        "(see DEBUGGING.md CODE=PBS_FLAVOR).",
+        True: "PBS Pro / OpenPBS (-J array syntax) is supported.",
+        None: "Could not determine PBS flavor from `qstat --version`; confirm your site "
+        "uses -J arrays (PBS Pro/OpenPBS), not Torque -t, before a large run.",
+    }
+    return {
+        "name": "pbs_flavor",
+        "required": False,
+        "status": "pass" if supported is True else "warn",
+        "detail": {
+            "flavor": flavor,
+            "qstat_version": out.splitlines()[:4],
+            "note": notes[supported],
+        },
+    }
+
+
 def check_engines() -> dict:
     """Report which MD engines are actually runnable in this environment."""
     engines = {}
@@ -80,8 +117,7 @@ def check_engines() -> dict:
         from openmm import Platform
 
         platforms = [
-            Platform.getPlatform(i).getName()
-            for i in range(Platform.getNumPlatforms())
+            Platform.getPlatform(i).getName() for i in range(Platform.getNumPlatforms())
         ]
         engines["openmm"] = {"available": True, "platforms": platforms}
     except Exception as exc:  # noqa: BLE001
@@ -98,7 +134,9 @@ def check_engines() -> dict:
 
 
 def check_gpu(expect_gpu: bool) -> dict:
-    rc, out = _run(["nvidia-smi", "--query-gpu=index,name,memory.total", "--format=csv,noheader"])
+    rc, out = _run(
+        ["nvidia-smi", "--query-gpu=index,name,memory.total", "--format=csv,noheader"]
+    )
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     detail = {
         "nvidia_smi_rc": rc,
@@ -116,11 +154,12 @@ def check_config(config_path: str | None) -> dict:
         return {"name": "config", "required": False, "status": "skip", "detail": None}
     info = {"name": "config_validates", "required": True}
     try:
+        from pathlib import Path
+
         import yaml
 
         from trails_md.cli import resolve_config_paths
         from trails_md.config import TrailsMDConfig
-        from pathlib import Path
 
         with open(config_path) as fh:
             raw = yaml.safe_load(fh)
@@ -160,14 +199,23 @@ def check_shared_filesystem() -> dict:
             except OSError:
                 pass
     detail["writable"] = ok
-    detail["note"] = "Confirm this path is on a shared FS (Lustre/GPFS/NFS), not node-local /tmp."
-    return {"name": "filesystem", "required": True, "status": "pass" if ok else "fail", "detail": detail}
+    detail["note"] = (
+        "Confirm this path is on a shared FS (Lustre/GPFS/NFS), not node-local /tmp."
+    )
+    return {
+        "name": "filesystem",
+        "required": True,
+        "status": "pass" if ok else "fail",
+        "detail": detail,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scheduler", choices=("slurm", "pbs"), required=True)
-    parser.add_argument("--gpu", action="store_true", help="this run targets a GPU queue")
+    parser.add_argument(
+        "--gpu", action="store_true", help="this run targets a GPU queue"
+    )
     parser.add_argument("--config", default=None)
     parser.add_argument("--out", default=None, help="write JSON report here")
     args = parser.parse_args(argv)
@@ -180,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
         check_gpu(args.gpu),
         check_config(args.config),
     ]
+    if args.scheduler == "pbs":
+        checks.insert(2, check_pbs_flavor())
     required_failed = [c for c in checks if c.get("required") and c["status"] == "fail"]
     report = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

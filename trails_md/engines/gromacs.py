@@ -91,6 +91,7 @@ class GromacsEngine(MDEngine):
         self.gromacs_mdrun_ntomp = gromacs_mdrun_ntomp
         self.gromacs_mdrun_extra_args = list(gromacs_mdrun_extra_args or [])
         self.gromacs_grompp_maxwarn = int(gromacs_grompp_maxwarn)
+        self.seed: int | None = kwargs.get("seed", None)
 
         # Set after prepare()
         self.topology_file: Path | None = None
@@ -102,9 +103,7 @@ class GromacsEngine(MDEngine):
     # MDEngine interface
     # ------------------------------------------------------------------
 
-    def prepare(
-        self, conf: Path, top: Path, system_file: Path | None = None
-    ) -> None:
+    def prepare(self, conf: Path, top: Path, system_file: Path | None = None) -> None:
         """Validate GROMACS input files and store run-time parameters.
 
         Parameters
@@ -209,6 +208,13 @@ class GromacsEngine(MDEngine):
         final_gro = workdir / f"_final_{run_index}.gro"
         edr_file = workdir / f"_run_{run_index}.edr"
         log_file = workdir / f"_run_{run_index}.log"
+        # grompp writes mdout.mdp and mdrun writes state.cpt/state_prev.cpt to the
+        # *current* directory by default. On an HPC run that is the submit dir, so
+        # redirect them into the per-walker workdir (and clean them up below)
+        # instead of littering the launch directory.
+        mdout_mdp = workdir / f"_mdout_{run_index}.mdp"
+        cpt_file = workdir / f"_state_{run_index}.cpt"
+        cpt_prev = workdir / f"_state_{run_index}_prev.cpt"
 
         # ── Build subprocess environment ──────────────────────────────────
         env = os.environ.copy()
@@ -237,6 +243,8 @@ class GromacsEngine(MDEngine):
             str(self.topology_file),
             "-o",
             str(tpr_file),
+            "-po",
+            str(mdout_mdp),
             "-maxwarn",
             str(self.gromacs_grompp_maxwarn),
         ]
@@ -294,6 +302,8 @@ class GromacsEngine(MDEngine):
             str(edr_file),
             "-g",
             str(log_file),
+            "-cpo",
+            str(cpt_file),
         ]
         mdrun_cmd.extend(self._mdrun_option_args())
 
@@ -332,16 +342,45 @@ class GromacsEngine(MDEngine):
         shutil.move(str(xtc_tmp), str(traj_out))
 
         # ── Clean up scratch files ────────────────────────────────────────
-        for path in (gro_start, mdp_file, tpr_file, final_gro, edr_file, log_file):
+        for path in (
+            gro_start,
+            mdp_file,
+            tpr_file,
+            final_gro,
+            edr_file,
+            log_file,
+            mdout_mdp,
+            cpt_file,
+            cpt_prev,
+        ):
             if path.exists():
                 path.unlink()
 
         return True
 
+    def _resolve_ntomp(self) -> int | None:
+        """OpenMP thread count for ``mdrun -ntomp``.
+
+        An explicit ``gromacs_mdrun_ntomp`` always wins. Otherwise derive it from
+        the environment the walker runs in -- ``OMP_NUM_THREADS`` or the
+        scheduler's ``SLURM_CPUS_PER_TASK`` -- so a walker respects its per-task
+        CPU allocation instead of letting ``mdrun`` grab every core on the node
+        (which oversubscribes badly when several walkers share a node). Returns
+        ``None`` (leave it to ``mdrun``) only when no hint is available.
+        """
+        if self.gromacs_mdrun_ntomp is not None:
+            return self.gromacs_mdrun_ntomp
+        for var in ("OMP_NUM_THREADS", "SLURM_CPUS_PER_TASK"):
+            value = os.environ.get(var)
+            if value and value.isdigit() and int(value) > 0:
+                return int(value)
+        return None
+
     def _mdrun_option_args(self) -> list[str]:
         args = ["-ntmpi", str(self.gromacs_mdrun_ntmpi)]
-        if self.gromacs_mdrun_ntomp is not None:
-            args.extend(["-ntomp", str(self.gromacs_mdrun_ntomp)])
+        ntomp = self._resolve_ntomp()
+        if ntomp is not None:
+            args.extend(["-ntomp", str(ntomp)])
         for flag, value in (
             ("-nb", self.gromacs_mdrun_nb),
             ("-pme", self.gromacs_mdrun_pme),
@@ -452,7 +491,12 @@ class GromacsEngine(MDEngine):
                 f"; Velocity generation — always regenerate for spawned frames\n"
                 f"gen_vel                 = yes\n"
                 f"gen_temp                = {self.temperature:.2f}\n"
-                f"gen_seed                = -1\n"
+                f"gen_seed                = {-1 if self.seed is None else self.seed}\n"
+                f"\n"
+                f"; Stochastic dynamics seed — pins the V-rescale thermostat's\n"
+                f"; random stream so a fixed per-walker seed is bitwise reproducible\n"
+                f"; (ld-seed defaults to -1 = random otherwise).\n"
+                f"ld-seed                 = {-1 if self.seed is None else self.seed}\n"
             )
 
         Path(filepath).write_text(content)

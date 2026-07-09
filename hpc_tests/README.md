@@ -20,11 +20,15 @@ can localize any failure using [`DEBUGGING.md`](DEBUGGING.md).
 | PBS   | CPU-only | `pbs/run_cpu.pbs` | `configs/alad_cpu_pbs.yaml` |
 | PBS   | GPU | `pbs/run_gpu.pbs` | `configs/alad_gpu_pbs.yaml` |
 
-All four use the **same tiny alanine-dipeptide workload** (vacuum Amber14 system,
-no external force fields, 8 walkers × 2–10 ps). It runs in a few minutes, so the
-matrix isolates *scheduler/HPC behaviour* from force-field/asset complexity. The
-CPU and GPU variants differ only in `engine.platform_name` (CPU vs CUDA) and the
-per-task resource request.
+All four use the **same tiny alanine-dipeptide workload**: a 22-atom vacuum
+system built with the Amber14 force field and run through the **OpenMM** engine
+(`system.py`, no external force-field files or solvent), 8 walkers × 2–10 ps. It
+runs in a few minutes, so the matrix isolates *scheduler/HPC behaviour* from
+force-field/asset complexity. The CPU and GPU variants differ only in
+`engine.platform_name` (CPU vs CUDA) and the per-task resource request. The
+broader **feature matrix** (other engines, spawners, learned CVs, MSM, resume,
+paths) is covered by the local-mirror runner and its scheduler wrappers — see
+[`RUNBOOK.md`](RUNBOOK.md).
 
 ## Prerequisites (once per cluster)
 

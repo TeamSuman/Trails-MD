@@ -218,9 +218,20 @@ def test_slurm_script_directives(tmp_path):
 def test_pbs_script_directives(tmp_path):
     backend = PBSBackend(cpus_per_task=4, gpus_per_task=2, memory="8G")
     script = backend._render_script(3, tmp_path / "m.txt", tmp_path / "logs")
+    assert "#PBS -V" in script
     assert "#PBS -J 0-2" in script
     assert "ncpus=4" in script and "ngpus=2" in script and "mem=8G" in script
     assert "PBS_ARRAY_INDEX" in script
+
+
+def test_torque_script_directives(tmp_path):
+    backend = ExecutionBackendFactory.get("torque", cpus_per_task=2)
+    script = backend._render_script(3, tmp_path / "m.txt", tmp_path / "logs")
+    assert "#PBS -V" in script
+    assert "#PBS -t 0-2" in script
+    assert "PBS_ARRAYID" in script
+
+
 
 
 def test_slurm_parse_job_id():

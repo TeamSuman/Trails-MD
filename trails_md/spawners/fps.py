@@ -17,8 +17,9 @@ class FPSSpawner(Spawner):
         self,
         mode: str = "explore",
         target: list | None = None,
-        **_,
+        **kwargs,
     ):
+        super().__init__(**kwargs)
         self.mode = mode
         self.target = np.asarray(target, dtype=float) if target is not None else None
 
@@ -37,7 +38,7 @@ class FPSSpawner(Spawner):
             dists_to_target = np.linalg.norm(cumulative_points - self.target, axis=1)
             seed = int(np.argmin(dists_to_target))
         else:
-            seed = np.random.randint(n_points)
+            seed = int(self.rng.integers(0, n_points))
 
         selected = [seed]
         distances = np.linalg.norm(cumulative_points - cumulative_points[seed], axis=1)

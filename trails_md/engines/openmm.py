@@ -33,6 +33,7 @@ class OpenMMEngine(MDEngine):
         self.npt = npt
         self.should_equilibrate = equilibrate
         self.gromacs_include_dir = gromacs_include_dir
+        self.seed: int | None = kwargs.get("seed", None)
 
         self.simulation = None
         self.positions = None
@@ -40,8 +41,7 @@ class OpenMMEngine(MDEngine):
     @staticmethod
     def _available_platforms() -> list[str]:
         return [
-            Platform.getPlatform(i).getName()
-            for i in range(Platform.getNumPlatforms())
+            Platform.getPlatform(i).getName() for i in range(Platform.getNumPlatforms())
         ]
 
     @classmethod
@@ -51,12 +51,13 @@ class OpenMMEngine(MDEngine):
         except Exception as exc:
             ", ".join(cls._available_platforms()) or "none"
             import logging
-            logging.warning(f"OpenMM platform {platform_name} validation failed (likely because you are on a login node). Assuming compute nodes will have it. Error: {exc}")
+
+            logging.warning(
+                f"OpenMM platform {platform_name} validation failed (likely because you are on a login node). Assuming compute nodes will have it. Error: {exc}"
+            )
             return None
 
-    def prepare(
-        self, conf: Path, top: Path, system_file: Path | None = None
-    ) -> None:
+    def prepare(self, conf: Path, top: Path, system_file: Path | None = None) -> None:
         """Prepare the MD environment, e.g., setup system, topology, forces."""
         gro_file = str(conf)
         top_file = str(top)
@@ -147,64 +148,176 @@ class OpenMMEngine(MDEngine):
             self.integrator = LangevinMiddleIntegrator(
                 self.temperature, self.friction, self.dt
             )
+            if self.seed is not None:
+                self.integrator.setRandomNumberSeed(self.seed)
 
         if self.npt:
-            self.system.addForce(
-                MonteCarloBarostat(
-                    self.pressure, self.temperature, self.barostatInterval
-                )
+            barostat = MonteCarloBarostat(
+                self.pressure, self.temperature, self.barostatInterval
             )
+            if self.seed is not None:
+                barostat.setRandomNumberSeed(self.seed)
+            self.system.addForce(barostat)
 
         self.integrator.setConstraintTolerance(self.constraintTolerance)
 
-    def _create_simulation(self, device_index: int):
-        platform_props = {}
-        if self.platform_name == "CUDA":
-            platform_props = {"Precision": self.precision}
-            # device_index >= 0 is a local-backend GPU slot; a negative sentinel
-            # means "let the scheduler's CUDA_VISIBLE_DEVICES decide" (SLURM/PBS
-            # array tasks) so we don't pin every task to physical device 0.
+    @staticmethod
+    def _cpu_thread_count() -> int | None:
+        """Thread cap for the OpenMM CPU platform, from the run environment.
+
+        Without a cap the CPU platform uses every core on the node, so several
+        CPU walkers sharing a node oversubscribe. Honour (in order)
+        ``OPENMM_CPU_THREADS``, the scheduler's ``SLURM_CPUS_PER_TASK``, or
+        ``OMP_NUM_THREADS``; return ``None`` (OpenMM decides) when none is set.
+        """
+        for var in ("OPENMM_CPU_THREADS", "SLURM_CPUS_PER_TASK", "OMP_NUM_THREADS"):
+            value = os.environ.get(var)
+            if value and value.isdigit() and int(value) > 0:
+                return int(value)
+        return None
+
+    def _platform_properties(self, device_index: int) -> dict:
+        """Platform-specific isolation properties.
+
+        ``device_index >= 0`` is a local-backend GPU slot to pin to; a negative
+        sentinel means "let the scheduler's ``*_VISIBLE_DEVICES`` decide"
+        (SLURM/PBS array tasks) so tasks are not all pinned to physical device 0.
+        """
+        name = self.platform_name
+        if name == "CUDA":
+            props = {"Precision": self.precision}
             if device_index >= 0:
-                platform_props["DeviceIndex"] = str(device_index)
-            try:
-                self.simulation = Simulation(
-                    self.topology,
-                    self.system,
-                    self.integrator,
-                    self.platform,
-                    platform_props,
+                props["DeviceIndex"] = str(device_index)
+            return props
+        if name == "OpenCL":
+            props = {"OpenCLPrecision": self.precision}
+            if device_index >= 0:
+                props["OpenCLDeviceIndex"] = str(device_index)
+            return props
+        if name == "HIP":
+            return {"HipDeviceIndex": str(device_index)} if device_index >= 0 else {}
+        if name == "CPU":
+            threads = self._cpu_thread_count()
+            return {"Threads": str(threads)} if threads else {}
+        return {}
+
+    def _new_simulation(self, platform_props: dict):
+        if self.platform is None:  # login-node validation returned no platform
+            return Simulation(self.topology, self.system, self.integrator)
+        return Simulation(
+            self.topology,
+            self.system,
+            self.integrator,
+            self.platform,
+            platform_props or {},
+        )
+
+    def _create_simulation(self, device_index: int):
+        import logging
+
+        platform_props = self._platform_properties(device_index)
+        try:
+            self.simulation = self._new_simulation(platform_props)
+        except Exception as e:
+            message = str(e)
+            cuda_device_error = self.platform_name == "CUDA" and any(
+                token in message
+                for token in (
+                    "CUDA_ERROR_NO_DEVICE",
+                    "could not be loaded",
+                    "no CUDA-capable device",
+                    "invalid device",
                 )
-            except Exception as e:
+            )
+            if cuda_device_error:
                 # Any device-load failure (no device, bad index, driver mismatch)
                 # should degrade to CPU rather than kill the walker/iteration.
-                message = str(e)
-                cuda_device_error = any(
-                    token in message
-                    for token in (
-                        "CUDA_ERROR_NO_DEVICE",
-                        "could not be loaded",
-                        "no CUDA-capable device",
-                        "invalid device",
-                    )
-                )
-                if not cuda_device_error:
-                    raise
-                import logging
-
                 logging.warning(
                     "OpenMM CUDA device unavailable (%s); falling back to CPU.",
                     message,
                 )
                 self.platform = self._get_platform("CPU")
                 self.platform_name = "CPU"
-                self.simulation = Simulation(
-                    self.topology, self.system, self.integrator, self.platform
+                self.simulation = self._new_simulation(
+                    self._platform_properties(device_index)
                 )
-        else:
-            self.simulation = Simulation(
-                self.topology, self.system, self.integrator, self.platform
-            )
+            elif platform_props:
+                # OpenCL/HIP/CPU: a rejected isolation property must never be
+                # worse than before — retry without the extra properties.
+                logging.warning(
+                    "OpenMM platform properties %s rejected (%s); retrying "
+                    "without them.",
+                    platform_props,
+                    message,
+                )
+                self.simulation = self._new_simulation({})
+            else:
+                raise
         self.simulation.context.setPositions(self.positions)
+
+    def _write_gpu_binding_marker(
+        self, traj_out: Path, requested_device_index: int, run_index: int
+    ) -> None:
+        """Record which platform/device this walker actually ran on.
+
+        Written as ``<traj_out>.gpu.json`` next to the trajectory so GPU device
+        isolation can be verified after the fact, independent of the run's log
+        level and identically for the local and scheduler backends. Capturing the
+        *resolved* platform also exposes a silent CUDA→CPU fallback (a bad device
+        pin) that would otherwise pass unnoticed. See
+        ``hpc_tests/checks/validate_results.py`` (``GPU_BINDING``).
+        """
+        import json
+        import logging
+
+        name = self.platform_name
+        device_index = ""
+        device_name = ""
+        if name in ("CUDA", "OpenCL", "HIP") and self.platform is not None:
+            idx_prop = (
+                "OpenCLDeviceIndex"
+                if name == "OpenCL"
+                else ("HipDeviceIndex" if name == "HIP" else "DeviceIndex")
+            )
+            name_prop = "OpenCLDeviceName" if name == "OpenCL" else "DeviceName"
+            for prop, dest in ((idx_prop, "index"), (name_prop, "name")):
+                try:
+                    value = self.platform.getPropertyValue(
+                        self.simulation.context, prop
+                    )
+                except Exception:  # noqa: BLE001 - property may be unsupported
+                    value = ""
+                if dest == "index":
+                    device_index = value
+                else:
+                    device_name = value
+        visible = (
+            os.environ.get("CUDA_VISIBLE_DEVICES")
+            or os.environ.get("HIP_VISIBLE_DEVICES")
+            or os.environ.get("GPU_DEVICE_ORDINAL")
+            or ""
+        )
+        marker = {
+            "run_index": int(run_index),
+            "platform": name,
+            "requested_device_index": int(requested_device_index),
+            "device_index": device_index,
+            "device_name": device_name,
+            "visible_devices": visible,
+        }
+        try:
+            Path(f"{traj_out}.gpu.json").write_text(json.dumps(marker))
+        except OSError as exc:
+            logging.warning("Could not write GPU binding marker: %s", exc)
+        logging.info(
+            "Trails-MD walker GPU binding: run=%s platform=%s device_index=%s "
+            "visible_devices=%s device=%s",
+            run_index,
+            name,
+            device_index or requested_device_index,
+            visible,
+            device_name,
+        )
 
     def run_production(
         self,
@@ -217,6 +330,7 @@ class OpenMMEngine(MDEngine):
     ) -> bool:
         """Execute a production run."""
         self._create_simulation(device_index)
+        self._write_gpu_binding_marker(traj_out, device_index, run_index)
 
         traj_out_str = str(traj_out)
         if os.path.exists(traj_out_str):
@@ -232,7 +346,9 @@ class OpenMMEngine(MDEngine):
             if start_box_vectors is not None:
                 self.simulation.context.setPeriodicBoxVectors(*start_box_vectors)
             self.simulation.context.setPositions(start_positions)
-            self.simulation.context.setVelocitiesToTemperature(self.temperature)
+            self.simulation.context.setVelocitiesToTemperature(
+                self.temperature, self.seed if self.seed is not None else 0
+            )
 
         self.simulation.reporters = [self._trajectory_reporter(traj_out_str, stride)]
 
@@ -253,11 +369,15 @@ class OpenMMEngine(MDEngine):
             if start_box_vectors is not None:
                 self.simulation.context.setPeriodicBoxVectors(*start_box_vectors)
             self.simulation.context.setPositions(recovery_positions)
-            self.simulation.context.setVelocitiesToTemperature(self.temperature)
+            self.simulation.context.setVelocitiesToTemperature(
+                self.temperature, self.seed if self.seed is not None else 0
+            )
 
             self.simulation.minimizeEnergy()
             if self.should_equilibrate:
-                self.simulation.context.setVelocitiesToTemperature(self.temperature)
+                self.simulation.context.setVelocitiesToTemperature(
+                    self.temperature, self.seed if self.seed is not None else 0
+                )
                 self.simulation.step(self.equilibrationSteps)
 
             self.simulation.reporters = [

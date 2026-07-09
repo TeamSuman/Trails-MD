@@ -1,13 +1,17 @@
 from typing import Any
 
 import numpy as np
-import torch
-from deeptime.decomposition.deep import TVAE
-from deeptime.util.data import TrajectoryDataset
-from torch.utils.data import DataLoader
 
 from .scalers import TrajectoryScaler
-from .tvae import TVAEBottleneckDecoder, TVAEBottleneckEncoder
+
+
+def _default_device() -> str:
+    try:
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except ModuleNotFoundError:
+        return "cpu"
 
 
 class AdaptiveSpaceModel:
@@ -61,7 +65,7 @@ class AdaptiveSpaceModel:
         self.scaler = TrajectoryScaler("minmax")
         self.model = None
         self.fitted = None  # PyTorch model used for projection
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = _default_device()
 
     def __setstate__(self, state: dict) -> None:
         state = dict(state)
@@ -83,7 +87,7 @@ class AdaptiveSpaceModel:
             if not hasattr(self, key):
                 setattr(self, key, list(value) if isinstance(value, list) else value)
         if not hasattr(self, "device"):
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = _default_device()
 
     def _batch_size(self, n_walkers: int, walker_length: int) -> int:
         self.ensure_config_defaults()
@@ -105,9 +109,14 @@ class AdaptiveSpaceModel:
         # Reseed the torch RNG from the configured seed before every fit so that a
         # CV retrained at iteration N is reproducible regardless of the RNG draws
         # made in between (network init, DataLoader shuffling, etc.).
-        torch.manual_seed(self.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(self.seed)
+        try:
+            import torch
+
+            torch.manual_seed(self.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(self.seed)
+        except ModuleNotFoundError:
+            pass
 
         # Fail fast with an actionable message if an optional backend is missing.
         from .registry import ensure_available, is_adaptive_space
@@ -123,6 +132,13 @@ class AdaptiveSpaceModel:
         scaled_features = self.scaler.transform(features)
 
         if self.type == "tvae":
+            import torch
+            from deeptime.decomposition.deep import TVAE
+            from deeptime.util.data import TrajectoryDataset
+            from torch.utils.data import DataLoader
+
+            from .tvae import TVAEBottleneckDecoder, TVAEBottleneckEncoder
+
             scaled_features = self._torch_features(scaled_features)
             # Reshape to a list of separate trajectory arrays for deeptime.
             traj_list = [
@@ -173,6 +189,8 @@ class AdaptiveSpaceModel:
             self.model.fit(scaled_features)
 
         elif self.type == "deep-tica":
+            import torch
+
             scaled_features = self._torch_features(scaled_features)
             traj_list = [
                 scaled_features[i * walker_length : (i + 1) * walker_length]
@@ -220,8 +238,11 @@ class AdaptiveSpaceModel:
                 trainer.fit(self.model, datamodule)
 
         elif self.type == "vampnet":
+            import torch
             from deeptime.decomposition.deep import VAMPNet
+            from deeptime.util.data import TrajectoryDataset
             from deeptime.util.torch import MLP
+            from torch.utils.data import DataLoader
 
             scaled_features = self._torch_features(scaled_features)
             traj_list = [
@@ -287,6 +308,9 @@ class AdaptiveSpaceModel:
         """Project scaled features into latent space."""
         self.ensure_config_defaults()
         scaled = self.scaler.transform(features)
+
+        if self.type in ("tvae", "vampnet", "spib", "deep-tica"):
+            import torch
 
         if self.type == "tvae":
             device = next(self.fitted.parameters()).device

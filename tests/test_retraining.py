@@ -102,3 +102,33 @@ def test_seed_manager_is_deterministic():
     SeedManager(123).set_seed()
     b = np.random.rand(5)
     np.testing.assert_array_equal(a, b)
+
+
+def test_feature_memory_pruning_bounds_growth():
+    import types
+    import numpy as np
+    from unittest.mock import MagicMock
+    from trails_md.core import TrailsMDCore
+
+    # Create a dummy TrailsMD instance with mocks
+    tmd = MagicMock(spec=TrailsMDCore)
+    tmd.config = MagicMock()
+    tmd.config.aggregate_memory = True
+    tmd.config.max_adaptive_memory_frames = 100  # Cap at 100 frames
+    tmd.feature_memory = []
+    # Pruning now draws its middle sample from the instance-bound generator.
+    tmd.seed_manager = types.SimpleNamespace(rng=np.random.default_rng(0))
+
+    # Suppose each iteration adds 10 frames (so max_iters should be 100 // 10 = 10)
+    for i in range(30):
+        tmd.feature_memory.append(np.ones((10, 4)) * i)
+        TrailsMDCore._prune_feature_memory(tmd)
+
+    # After 30 additions, length must be bounded by max_iters (10)
+    assert len(tmd.feature_memory) == 10
+    # Anchor (first iteration, index 0) should be preserved as [0]
+    assert np.all(tmd.feature_memory[0] == 0)
+    # Most recent iteration (index 29) should be preserved at the end
+    assert np.all(tmd.feature_memory[-1] == 29)
+
+
