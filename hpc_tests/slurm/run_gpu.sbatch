@@ -19,6 +19,12 @@ set -uo pipefail
 # source "$(conda info --base)/etc/profile.d/conda.sh"
 # conda activate trails-md
 # Mirror these in the config's execution.module_loads.
+#
+# Choosing the MD engine: OpenMM is used here (engine.md_engine: openmm). To use
+# GROMACS or Amber instead, `module load` the engine above (and in the config's
+# execution.module_loads for the array jobs), then set the executable in the
+# config: engine.gromacs_executable / engine.amber_executable (a name on PATH or
+# an absolute path), and for GROMACS engine.gromacs_include_dir.
 # =============================================================================
 
 REPO_ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
@@ -26,6 +32,7 @@ cd "$REPO_ROOT"
 CONFIG="${CONFIG:-hpc_tests/configs/alad_gpu_slurm.yaml}"
 ITERATIONS="${ITERATIONS:-3}"
 WALKERS="${WALKERS:-8}"
+GPU_COUNT="${GPU_COUNT:-}"          # distinct GPUs available; set to enforce walker spread
 RESULTS="${RESULTS:-results/slurm_gpu}"
 mkdir -p "$RESULTS"
 
@@ -53,9 +60,13 @@ PY
 )
 python hpc_tests/checks/validate_results.py --outdir "$OUTDIR" \
     --expect-iterations "$ITERATIONS" --expect-walkers "$WALKERS" \
-    --engine openmm --out "$RESULTS/validate.json"
+    --engine openmm --check-gpu-binding ${GPU_COUNT:+--gpu-count "$GPU_COUNT"} \
+    --out "$RESULTS/validate.json"
 VAL_RC=$?
 echo "SUMMARY: run_rc=$RUN_RC validate_rc=$VAL_RC results in $RESULTS/"
-# GPU-binding evidence: grep the walker logs to confirm distinct devices were used.
-echo "Tip: inspect $OUTDIR/iter_*/_jobs/logs_attempt*/ for per-walker CUDA device lines."
+# GPU_BINDING is now validated automatically from the per-walker <traj>.gpu.json
+# markers (catches a silent CUDA->CPU fallback; with GPU_COUNT set, also catches
+# all walkers piling onto one device). For manual inspection, the raw device each
+# walker used is in $OUTDIR/iter_*/*.gpu.json and the array logs under
+# $OUTDIR/iter_*/_jobs/logs_attempt*/.
 exit $(( RUN_RC != 0 || VAL_RC != 0 ))

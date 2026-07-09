@@ -37,7 +37,7 @@ at startup. Below, only non-obvious defaults are noted — see
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `spawn_scheme` | `density` | `density` \| `voronoi` \| `lof` \| `fps`. |
+| `spawn_scheme` | `density` | `density` \| `voronoi` \| `lof` \| `fps` \| `we`\* \| `msm`\* (\* experimental, beyond manuscript scope). |
 | `spawn_type` | `hard` | `hard` or `probabilistic`. |
 | `search_mode` | `explore` | `explore` or `target` (toward `target`). |
 | `walker` / `step` / `stride` | `10` / `10000` / `100` | Walkers per iteration / MD steps / save interval. |

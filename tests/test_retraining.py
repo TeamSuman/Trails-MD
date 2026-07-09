@@ -105,6 +105,7 @@ def test_seed_manager_is_deterministic():
 
 
 def test_feature_memory_pruning_bounds_growth():
+    import types
     import numpy as np
     from unittest.mock import MagicMock
     from trails_md.core import TrailsMDCore
@@ -115,6 +116,8 @@ def test_feature_memory_pruning_bounds_growth():
     tmd.config.aggregate_memory = True
     tmd.config.max_adaptive_memory_frames = 100  # Cap at 100 frames
     tmd.feature_memory = []
+    # Pruning now draws its middle sample from the instance-bound generator.
+    tmd.seed_manager = types.SimpleNamespace(rng=np.random.default_rng(0))
 
     # Suppose each iteration adds 10 frames (so max_iters should be 100 // 10 = 10)
     for i in range(30):

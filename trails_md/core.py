@@ -26,6 +26,7 @@ from trails_md.reporting import IterationReporter
 from trails_md.spaces import FeatureExtractor
 from trails_md.spaces.registry import is_adaptive_space
 from trails_md.spawners.base import SpawnerFactory
+from trails_md.spawners.history import pooled_history_iterations, projection_dim
 from trails_md.utils.seeds import SeedManager
 from trails_md.workflows.parallel import run_iteration_parallel
 
@@ -267,7 +268,17 @@ class TrailsMDCore:
                 f"Checkpoint history entry {latest_iteration} has no spawn_indices."
             )
 
-        trajectories = self._sampling_trajectories([])
+        # These spawn indices were computed at ``latest_iteration`` against the
+        # pool of history frames matching that iteration's projection dimension.
+        # Rebuild the trajectory list over the same iterations so the indices
+        # still resolve to the intended frames after a resume.
+        latest_projection = latest_entry.get("projection")
+        target_dim = (
+            projection_dim(latest_projection)
+            if latest_projection is not None
+            else None
+        )
+        trajectories = self._sampling_trajectories([], target_dim=target_dim)
         if not trajectories:
             raise RuntimeError(
                 f"Checkpoint history entry {latest_iteration} has no trajectories."
@@ -292,7 +303,6 @@ class TrailsMDCore:
             return [self.engine.positions for _ in range(self.config.spawning.walker)]
 
         import logging
-        import random
         from pathlib import Path
 
         import MDAnalysis as mda
@@ -336,7 +346,10 @@ class TrailsMDCore:
                 spawn_indices = list(np.linspace(0, n_frames - 1, n_walkers, dtype=int))
             else:
                 logging.info(f"Only {n_frames} frames available for {n_walkers} walkers; replicating randomly.")
-                spawn_indices = [random.choice(range(n_frames)) for _ in range(n_walkers)]
+                spawn_indices = [
+                    int(i)
+                    for i in self.seed_manager.rng.integers(0, n_frames, size=n_walkers)
+                ]
 
         feature_extractor = FeatureExtractor(
             topology=trajectory_topology,
@@ -595,12 +608,20 @@ class TrailsMDCore:
         spawn_indices = self.spawner.sample(
             points, self.config.spawning.walker, history=self.history
         )
-        sampling_trajectories = self._sampling_trajectories(trajectories)
+        # The spawner pooled historical frames matching the current projection
+        # dimension; build the trajectory and frame-record lists over the *same*
+        # iterations so each spawn index maps to the frame it was scored on.
+        target_dim = projection_dim(points)
+        sampling_trajectories = self._sampling_trajectories(
+            trajectories, target_dim=target_dim
+        )
         self._validate_sampling_trajectories(
             sampling_trajectories,
             context=f"spawning iteration {self.iteration}",
         )
-        sampling_frame_records = self._sampling_frame_records(current_frame_records)
+        sampling_frame_records = self._sampling_frame_records(
+            current_frame_records, target_dim=target_dim
+        )
         next_walker_parents = [
             map_global_frame(sampling_frame_records, index)["key"]
             for index in spawn_indices
@@ -641,11 +662,15 @@ class TrailsMDCore:
                 min_values=None if is_adaptive else self.config.min_values,
                 max_values=None if is_adaptive else self.config.max_values,
             )
-            # Gather all historical projections
-            cumulative_points = []
-            for entry in self.history.values():
-                if isinstance(entry, dict) and entry.get("projection") is not None:
-                    cumulative_points.append(np.asarray(entry["projection"]))
+            # Gather historical projections in the current CV dimension only, so a
+            # lower-dimensional initial-trajectory injection cannot make vstack
+            # raise and silently disable occupancy/convergence tracking.
+            cumulative_points = [
+                np.asarray(self.history[iteration]["projection"])
+                for iteration in pooled_history_iterations(
+                    self.history, projection_dim(points)
+                )
+            ]
             if cumulative_points:
                 all_points = np.vstack(cumulative_points)
                 table = binner.fit(all_points)
@@ -717,12 +742,15 @@ class TrailsMDCore:
             "convergence_reason": self.convergence_reason,
         }
 
-    def _sampling_trajectories(self, current_trajectories: list[str]) -> list[str]:
+    def _sampling_trajectories(
+        self, current_trajectories: list[str], target_dim: int | None = None
+    ) -> list[str]:
+        # ``target_dim`` selects the same historical iterations the spawner pooled
+        # (via pooled_history_iterations), so a spawn index maps to the intended
+        # trajectory even when history mixes projection dimensionalities.
         trajectories: list[str] = []
-        for iteration in sorted(self.history):
+        for iteration in pooled_history_iterations(self.history, target_dim):
             entry = self.history[iteration]
-            if not isinstance(entry, dict) or entry.get("projection") is None:
-                continue
             stored = entry.get("trajectories")
             if stored:
                 trajectories.extend(str(path) for path in stored)
@@ -734,13 +762,13 @@ class TrailsMDCore:
         return trajectories
 
     def _sampling_frame_records(
-        self, current_frame_records: list[dict[str, Any]]
+        self,
+        current_frame_records: list[dict[str, Any]],
+        target_dim: int | None = None,
     ) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
-        for iteration in sorted(self.history):
+        for iteration in pooled_history_iterations(self.history, target_dim):
             entry = self.history[iteration]
-            if not isinstance(entry, dict) or entry.get("projection") is None:
-                continue
             stored = entry.get("frames")
             if stored:
                 records.extend(stored)
@@ -804,8 +832,6 @@ class TrailsMDCore:
         first_len = len(self.feature_memory[0]) if len(self.feature_memory[0]) > 0 else 1
         max_iters = max(5, max_frames // first_len)
         if len(self.feature_memory) > max_iters:
-            import random
-
             # Keep initial anchor (0), keep recent quarter, randomly sample middle
             anchor = [self.feature_memory[0]]
             n_recent = max(1, (max_iters - 1) // 4)
@@ -813,7 +839,14 @@ class TrailsMDCore:
             recent = self.feature_memory[-n_recent:]
             middle_candidates = self.feature_memory[1:-n_recent] if n_middle > 0 else []
             if len(middle_candidates) > n_middle:
-                middle = random.sample(middle_candidates, n_middle)
+                # Instance-bound RNG (not the global ``random``) so pruning cannot
+                # be desynchronised by external RNG use; chronological order kept.
+                picks = sorted(
+                    self.seed_manager.rng.choice(
+                        len(middle_candidates), size=n_middle, replace=False
+                    )
+                )
+                middle = [middle_candidates[i] for i in picks]
             else:
                 middle = middle_candidates
             self.feature_memory = anchor + middle + recent
@@ -872,6 +905,9 @@ class TrailsMDCore:
             else None,
             # RNG state so a resumed run reproduces an uninterrupted one's stream.
             "rng_state": capture_rng_state(),
+            # Instance-bound sampling generator (initial-walker replication,
+            # feature-memory pruning); separate from the global RNG stream above.
+            "seed_manager_rng": self.seed_manager.rng.bit_generator.state,
         }
 
     def _restore_sampler_state(self, state: dict[str, Any] | None) -> None:
@@ -904,6 +940,13 @@ class TrailsMDCore:
             from trails_md.utils.seeds import restore_rng_state
 
             restore_rng_state(state["rng_state"])
+        if state.get("seed_manager_rng") is not None:
+            try:
+                self.seed_manager.rng.bit_generator.state = state["seed_manager_rng"]
+            except (ValueError, KeyError, TypeError) as exc:
+                logging.warning(
+                    "Could not restore instance sampling RNG on resume: %s", exc
+                )
 
     @staticmethod
     def _trajectory_file_problems(trajectories: list[str]) -> list[str]:
@@ -1142,11 +1185,24 @@ class TrailsMDCore:
         """Split cumulative history projections into continuous per-walker trajectories.
 
         Each short walker is one continuous trajectory; transition counts are
-        pooled across all of them by the estimator. Single-frame segments are
-        dropped because they carry no transitions.
+        pooled across all of them by the estimator. Segmentation uses the stored
+        per-walker frame records (``entry["frames"]``), which carry the *actual*
+        frame count each walker's trajectory was written with. This matters
+        because engines disagree on frame count: GROMACS writes the ``t=0`` frame
+        (``step//stride + 1`` frames per walker) while OpenMM and Amber write
+        ``step//stride``; an early-terminated walker differs again. Slicing a
+        concatenated projection by a *constant* ``step//stride`` would stitch the
+        tail of one walker to the head of the next and inject spurious
+        inter-walker transitions into the MSM count matrix. Single-frame segments
+        are dropped (they carry no transitions).
+
+        Only projections in the current (most recent) CV/latent dimensionality
+        are included, so a lower-dimensional initial-trajectory injection (e.g. a
+        2-D physical-CV ``iter -1`` alongside an n-D adaptive space) cannot be
+        mixed into the clustering.
         """
-        frames_per_walker = self.config.spawning.step // self.config.spawning.stride
         trajs: list[Any] = []
+        target_dim = self._latest_projection_dim()
         for iteration in sorted(self.history):
             entry = self.history[iteration]
             if not isinstance(entry, dict):
@@ -1157,18 +1213,64 @@ class TrailsMDCore:
             projection = np.asarray(projection, dtype=float)
             if projection.ndim == 1:
                 projection = projection.reshape(-1, 1)
-            if frames_per_walker <= 0:
-                if len(projection) > 1:
-                    trajs.append(projection)
+            if target_dim is not None and projection.shape[1] != target_dim:
                 continue
-            n_walkers = int(np.ceil(len(projection) / frames_per_walker))
-            for walker in range(n_walkers):
-                segment = projection[
-                    walker * frames_per_walker : (walker + 1) * frames_per_walker
-                ]
+            for segment in self._segment_projection_by_walker(
+                projection, entry.get("frames")
+            ):
                 if len(segment) > 1:
                     trajs.append(segment)
         return trajs
+
+    def _latest_projection_dim(self) -> int | None:
+        """Feature dimension of the most recent non-empty projection, or None."""
+        for iteration in sorted(self.history, reverse=True):
+            entry = self.history[iteration]
+            if isinstance(entry, dict) and entry.get("projection") is not None:
+                proj = np.asarray(entry["projection"])
+                return 1 if proj.ndim == 1 else int(proj.shape[1])
+        return None
+
+    def _segment_projection_by_walker(
+        self, projection: np.ndarray, frames: list[dict[str, Any]] | None
+    ):
+        """Yield one contiguous projection segment per walker.
+
+        Uses the stored frame records (row-aligned 1:1 with ``projection``) to
+        find exact per-walker boundaries. Falls back to a constant
+        ``step//stride`` slice only for legacy history entries written before
+        frame-record storage (or when the record count does not match the
+        projection length).
+        """
+        n = len(projection)
+        if frames and len(frames) == n:
+            groups: dict[int, list[int]] = {}
+            order: list[int] = []
+            for row, record in enumerate(frames):
+                walker = int(record.get("walker", 0))
+                if walker not in groups:
+                    groups[walker] = []
+                    order.append(walker)
+                groups[walker].append(row)
+            for walker in order:
+                yield projection[groups[walker]]
+            return
+
+        if not getattr(self, "_warned_msm_frame_fallback", False):
+            logging.debug(
+                "MSM trajectory segmentation: a history entry has no per-walker "
+                "frame records; falling back to constant step//stride slicing."
+            )
+            self._warned_msm_frame_fallback = True
+        frames_per_walker = self.config.spawning.step // self.config.spawning.stride
+        if frames_per_walker <= 0:
+            yield projection
+            return
+        n_walkers = int(np.ceil(n / frames_per_walker))
+        for walker in range(n_walkers):
+            yield projection[
+                walker * frames_per_walker : (walker + 1) * frames_per_walker
+            ]
 
     def _maybe_build_msm(self) -> None:
         """Estimate the MSM for the just-completed iteration and update convergence."""

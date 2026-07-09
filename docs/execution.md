@@ -115,6 +115,34 @@ execution:
 element). For CPU-only HPC, set `gpus_per_task: 0` and an OpenMM `CPU`
 platform (or a CPU GROMACS/Amber build) and scale out across many array tasks.
 
+## Choosing your MD engine
+
+The engine is `engine.md_engine` (`openmm` | `gromacs` | `amber`). **OpenMM** is
+used natively through its Python API — no external executable, just the `openmm`
+package importable in the job environment. **GROMACS** and **Amber** are external
+programs, so you select them by making the executable available (module or path)
+and pointing the config at it:
+
+```yaml
+engine:
+  md_engine: gromacs
+  gromacs_executable: gmx            # a name on PATH, or an absolute path
+  gromacs_include_dir: /opt/gromacs/share/gromacs/top   # holds the *.ff force-field dirs
+```
+
+```yaml
+engine:
+  md_engine: amber
+  amber_executable: pmemd.cuda       # pmemd | pmemd.cuda | sander; PATH or absolute path
+```
+
+On a scheduler backend the array jobs run in **fresh shells**, so the engine's
+module must be loaded there too: add it to `execution.module_loads` (e.g.
+`"module load gromacs/2024"`), which is replayed inside every walker job. Giving
+an **absolute** `*_executable` path avoids depending on a module to set `PATH`.
+The HPC test suite exercises all three engines this way — see
+[`hpc_tests/RUNBOOK.md`](https://github.com/TeamSuman/Trails-MD/blob/main/hpc_tests/RUNBOOK.md).
+
 ## Fault tolerance for long campaigns
 
 By default (`min_success_fraction: 1.0`) any walker failure aborts the iteration

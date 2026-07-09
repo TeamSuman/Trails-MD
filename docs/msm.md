@@ -6,6 +6,14 @@ distribution at each spawn point, so adaptive trajectories are designed for
 efficient exploration of a CV space, not as an unbiased kinetic ensemble on
 their own.
 
+> **Scope note.** The two-stage strategy below (adaptive exploration → seed →
+> post-hoc MSM) is the manuscript-supported workflow. The optional **in-loop**
+> MSM (`msm.enabled: true`, and MSM-driven convergence / spawning) is
+> **experimental/beta** and outside the manuscript scope: it estimates an
+> *unweighted* MSM on short, non-equilibrium, adaptively-selected walkers, so its
+> rates are not unbiased. For quantitative kinetics, seed longer unbiased runs
+> and reweight with TRAM/dTRAM rather than relying on the in-loop estimate.
+
 ## The two-stage strategy
 
 1. **Adaptive exploration.** Run a Trails-MD campaign (see

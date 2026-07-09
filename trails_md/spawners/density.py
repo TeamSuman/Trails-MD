@@ -8,6 +8,7 @@ import numpy as np
 from trails_md.binning.spatial import BinTable, RegularBinner
 
 from .base import Spawner, SpawnerFactory
+from .history import pooled_history_iterations
 
 
 class DensitySpawner(Spawner):
@@ -35,7 +36,9 @@ class DensitySpawner(Spawner):
         # Optional landscape-adaptive binner (set by the orchestrator); None -> grid.
         self.binner = None
 
-    def sample(self, points: np.ndarray, top_n: int, history: dict[int, Any] | None = None) -> list[int]:
+    def sample(
+        self, points: np.ndarray, top_n: int, history: dict[int, Any] | None = None
+    ) -> list[int]:
         points = np.asarray(points, dtype=float)
         cumulative_points = _cumulative_points(points, history)
         if self.binner is not None:
@@ -83,7 +86,9 @@ class DensitySpawner(Spawner):
                 rows = rows[np.argsort(table.target_closeness[rows])[::-1]]
             fresh = [row for row in rows if table.ids[int(row)] not in recent]
             stale = [row for row in rows if table.ids[int(row)] in recent]
-            ordered = list(self.rng.permutation(fresh)) + list(self.rng.permutation(stale))
+            ordered = list(self.rng.permutation(fresh)) + list(
+                self.rng.permutation(stale)
+            )
             selected.extend(int(row) for row in ordered)
             if len(selected) >= top_n:
                 return np.asarray(selected[:top_n], dtype=int)
@@ -91,37 +96,75 @@ class DensitySpawner(Spawner):
         repeats = int(np.ceil(top_n / len(selected)))
         return np.tile(np.asarray(selected, dtype=int), repeats)[:top_n]
 
+    def state_dict(self) -> dict[str, Any]:
+        # Persist the hard-mode recency memory so a resumed run reproduces the
+        # bin-avoidance behaviour of an uninterrupted one. Bin ids are tuples;
+        # store them as lists (round-tripped back to sets on load).
+        state = super().state_dict()
+        state["recent_bins"] = [
+            [
+                list(bin_id) if isinstance(bin_id, (tuple, list)) else bin_id
+                for bin_id in bins
+            ]
+            for bins in self.recent_bins
+        ]
+        return state
 
-def _sample_frames(table: BinTable, rows: np.ndarray, rng: np.random.Generator | None = None) -> list[int]:
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        super().load_state_dict(state)
+        if state and state.get("recent_bins") is not None:
+            self.recent_bins.clear()
+            for bins in state["recent_bins"]:
+                self.recent_bins.append(
+                    {
+                        tuple(bin_id) if isinstance(bin_id, list) else bin_id
+                        for bin_id in bins
+                    }
+                )
+
+
+def _sample_frames(
+    table: BinTable, rows: np.ndarray, rng: np.random.Generator | None = None
+) -> list[int]:
     choice_fn = rng.choice if rng is not None else np.random.choice
     return [int(choice_fn(table.populated_data[int(row)])) for row in rows]
 
 
-def _cumulative_points(points: np.ndarray, history: dict[int, Any] | None) -> np.ndarray:
+def _cumulative_points(
+    points: np.ndarray, history: dict[int, Any] | None
+) -> np.ndarray:
     historical = _historical_points(points, history)
     if historical.size == 0:
         return points
     return np.vstack([historical, points])
 
 
-def _historical_points(points: np.ndarray, history: dict[int, Any] | None) -> np.ndarray:
+def _historical_points(
+    points: np.ndarray, history: dict[int, Any] | None
+) -> np.ndarray:
+    empty = np.empty((0, points.shape[1]), dtype=float)
     if not history:
-        return np.empty((0, points.shape[1]), dtype=float)
+        return empty
 
+    # Single source of truth for which historical iterations enter the pool, so
+    # the candidate points here stay index-synchronized with the trajectory and
+    # frame-record lists that core.py builds for the same spawn indices.
     projections = []
-    for iteration in sorted(history):
-        entry = history[iteration]
-        projection = entry.get("projection") if isinstance(entry, dict) else None
-        if projection is None:
-            continue
-        projection = np.asarray(projection, dtype=float)
-        if projection.ndim == 2 and projection.shape[1] == points.shape[1]:
-            projections.append(projection)
+    for iteration in pooled_history_iterations(history, points.shape[1]):
+        projection = np.asarray(history[iteration]["projection"], dtype=float)
+        if projection.ndim == 1:
+            projection = projection.reshape(-1, 1)
+        projections.append(projection)
 
-    return np.vstack(projections) if projections else np.empty((0, points.shape[1]), dtype=float)
+    return np.vstack(projections) if projections else empty
 
 
-def _weighted_choice(rows: np.ndarray, weights: np.ndarray, top_n: int, rng: np.random.Generator | None = None) -> np.ndarray:
+def _weighted_choice(
+    rows: np.ndarray,
+    weights: np.ndarray,
+    top_n: int,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
     weights = np.asarray(weights, dtype=float)
     weights = np.where(np.isfinite(weights), weights, 0.0)
     if weights.sum() <= 0:

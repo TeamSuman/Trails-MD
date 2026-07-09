@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -290,12 +291,14 @@ def _write_connected_trajectory_with_gromacs(
 
     gmx = shutil.which("gmx")
     if gmx is None:
-        fallback = Path("/home/dm/Soft/GMX26/bin/gmx")
-        if fallback.exists():
-            gmx = str(fallback)
+        # Allow an explicit override for sites where gmx is not on PATH.
+        override = os.environ.get("TRAILS_MD_GMX")
+        if override and Path(override).exists():
+            gmx = override
     if gmx is None:
         raise ImportError(
-            "MDAnalysis is not installed and no GROMACS 'gmx' executable was found."
+            "MDAnalysis is not installed and no GROMACS 'gmx' executable was found. "
+            "Install MDAnalysis, put 'gmx' on PATH, or set TRAILS_MD_GMX to its path."
         )
 
     output = Path(output)

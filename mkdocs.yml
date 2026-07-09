@@ -32,6 +32,7 @@ nav:
   - MSM & kinetic seeding: msm.md
   - Execution (workstation & HPC): execution.md
   - HPC scaling & WESTPA comparison: hpc_scaling.md
+  - Performance & GPU utilization: performance.md
   - CLI reference: cli.md
   - References: references.md
   - Tutorials:

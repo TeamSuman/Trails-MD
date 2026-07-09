@@ -8,6 +8,12 @@ The available learned methods live in a single registry
 (`trails_md/spaces/registry.py`), which also tracks each method's backend and
 whether it is available in your environment.
 
+> **Scope note.** `fixed`, `pca`, `tica`, `tvae`, and `deep-tica` are the
+> methods exercised in the manuscript. `vampnet`, `spib`, and `deep-lda` are
+> available through the same interface but are **experimental/beta**: validate
+> them against interpretable observables for your system before drawing
+> conclusions.
+
 ## Available methods
 
 | `space_mode` | Method                        | Backend               | Notes |
@@ -17,6 +23,17 @@ whether it is available in your environment.
 | `tica`        | Time-lagged ICA               | deeptime                | Linear, dynamics-aware. |
 | `tvae`        | Time-lagged VAE                | deeptime + torch        | Nonlinear bottleneck. |
 | `deep-tica`   | Deep (nonlinear) TICA          | mlcolvar + lightning     | `pip install "trails-md[deep-tica]"`. |
+| `vampnet`     | VAMPNet (deep VAMP-2 CVs)      | deeptime + torch        | **Experimental** (not in the manuscript). |
+| `spib`        | State Predictive Info Bottleneck | torch                | **Experimental**; no self-consistent state refinement (see below). |
+| `deep-lda`    | Deep LDA (supervised)          | mlcolvar + lightning     | **Experimental**; needs per-frame state labels. |
+
+The last three modes share the same interface but are **beyond the current
+manuscript scope** — the paper describes them as extension points, not validated
+methods. `spib` runs a single-pass information-bottleneck projection without the
+iterative self-consistent state refinement of the original method; treat its
+states as exploratory, not converged metastable assignments. Validate any of the
+three against interpretable observables for your system before drawing
+conclusions.
 
 `fixed` mode uses a user `project_file` exposing
 `extract_cvs(trajectories, top_file, conf_file) -> ndarray`.

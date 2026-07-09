@@ -12,6 +12,8 @@ the next iteration's walkers from. Spawners:
 | `voronoi` | Restart from sparse Voronoi (k-means) cells; scales better than a grid in higher-dimensional CV spaces. |
 | `lof` | Restart from statistical outliers (local outlier factor). |
 | `fps` | Farthest-point sampling for maximal coverage. |
+| `we` | Weighted-ensemble split/merge resampling. **Experimental** (beyond manuscript scope); see [MSM & kinetic seeding](msm.md) on weight validity. |
+| `msm` | MSM least-counts / uncertainty-driven spawning (needs `msm.enabled`). **Experimental** (beyond manuscript scope). |
 
 Any spawner can also be pointed toward a target region of the CV space
 (`search_mode: target`), balancing exploration with progress toward the

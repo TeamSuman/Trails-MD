@@ -71,9 +71,7 @@ def run(
 
     if resume is not None:
         checkpoint_iteration = (
-            sampler.latest_checkpoint_iteration()
-            if resume == "latest"
-            else int(resume)
+            sampler.latest_checkpoint_iteration() if resume == "latest" else int(resume)
         )
         sampler.restore_checkpoint(
             checkpoint_iteration,
@@ -99,6 +97,27 @@ def run(
         if result.get("converged"):
             print(f"Converged: {result.get('convergence_reason')}")
             break
+
+    # Persist a machine-readable campaign outcome next to the outputs so tooling
+    # (validators, analysis, an HPC agent benchmarking convergence) does not have
+    # to scrape the driver log. Written for every backend since cli.run is the
+    # single campaign entry point.
+    import json
+
+    try:
+        (sampler.outdir / "convergence.json").write_text(
+            json.dumps(
+                {
+                    "converged": bool(getattr(sampler, "converged", False)),
+                    "convergence_reason": getattr(sampler, "convergence_reason", None),
+                    "completed_iterations": completed_iterations,
+                    "requested_iterations": iterations,
+                },
+                indent=2,
+            )
+        )
+    except OSError as exc:
+        logging.warning("Could not write convergence.json: %s", exc)
 
     return sampler.outdir, completed_iterations
 
