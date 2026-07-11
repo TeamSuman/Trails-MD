@@ -37,7 +37,6 @@ trails-md --config examples/alanine_dipeptide/config.yaml --iterations 5
 | `AIB9/config_we.yaml` | Weighted-ensemble (WE) spawner | GPU recommended |
 | `AIB9/config_target.yaml` | Target-mode search toward a CV point | GPU recommended |
 | `AIB9/config_pbs.yaml` | PBS/Torque HPC backend (array job per iteration) | A PBS cluster |
-| `AIB9/config_tda_phi_sweep.yaml` | TDA phi sweep | Needs external Zenodo assets (see the config header) |
 
 ## Alanine dipeptide (GROMACS topology via OpenMM)
 
