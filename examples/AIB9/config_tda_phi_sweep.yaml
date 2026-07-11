@@ -1,3 +1,14 @@
+# TDA (topological-data-analysis) phi-sweep example for AIB9.
+#
+# This example is NOT self-contained: it needs external assets that are not
+# shipped in the repo (they are large). Obtain them before running:
+#   * Structure/topology from Zenodo record 14679134
+#     (https://zenodo.org/records/14679134) -> place aib9.gro and topol.top under
+#     reference/zenodo_14679134/ (paths below).
+#   * A trained TDA baseline model at
+#     training_data/aib9_lr_tda/tda_baseline/tda_baseline_model.pt, loaded by
+#     project_tda_phi_psi.py. Train/obtain it separately.
+# With those in place, run as any other config (`trails-md --config ...`).
 system:
   conf_file: reference/zenodo_14679134/aib9.gro
   top_file: reference/zenodo_14679134/topol.top

@@ -39,10 +39,11 @@ the advanced blocks (`execution`, `adaptive_model`) are **opt-in**.
 ## Choosing methods (the knobs that matter most)
 
 **Sampling method** — `spawning.spawn_scheme`:
-`density` · `voronoi` · `lof` · `fps`.
+`density` · `voronoi` · `lof` · `fps` (+ experimental `we` · `msm`).
 
 **CV method** — `space_mode`:
-`fixed` (your `project_file`) · `pca` · `tica` · `tvae` · `deep-tica`.
+`fixed` (your `project_file`) · `pca` · `tica` · `tvae` · `deep-tica`
+(+ experimental `vampnet` · `spib` · `deep-lda`).
 Hyperparameters live in `adaptive_model` (`lagtime`, `latent_dim`, `epochs`,
 `encoder_hidden_dims`, …). See [Collective variables](cv_methods.md).
 

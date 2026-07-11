@@ -44,7 +44,7 @@ execution:
   account: my_alloc
   walltime: "02:00:00"
   cpus_per_task: 8
-  gpus_per_task: 1
+  gpus_per_task: 1          # some sites reject this; use `gres` instead (below)
   memory: "16G"
   max_retries: 2
   poll_interval: 30

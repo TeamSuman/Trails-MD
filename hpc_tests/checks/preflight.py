@@ -2,7 +2,7 @@
 """Trails-MD HPC preflight checker.
 
 Runs *before* submitting any walker job and records a structured JSON report of
-the runtime environment so a human (or a future automated agent) can tell an
+the runtime environment so a human (or automated tooling) can tell an
 environment problem apart from a code problem when a cluster run fails.
 
 Usage::

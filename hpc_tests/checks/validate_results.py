@@ -4,7 +4,7 @@
 Parses a run ``outdir`` and checks the invariants an HPC scheduler run must
 satisfy, then emits a structured JSON verdict plus a human-readable summary.
 Designed to be run *after* a cluster job finishes so a person — or an automated
-agent debugging the run — can quickly localize a failure.
+tooling debugging the run — can quickly localize a failure.
 
 Usage::
 

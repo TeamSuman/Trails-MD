@@ -1,6 +1,6 @@
 # Trails-MD HPC debugging playbook
 
-Audience: a person — or a Claude Code agent — triaging a failed cluster run.
+Audience: anyone triaging a failed cluster run.
 Start from the structured JSON reports, then use the sections below, which are
 keyed to the failure `code`s emitted by `checks/validate_results.py` and the
 checks in `checks/preflight.py`. Each entry gives **symptom → likely cause →
@@ -245,7 +245,7 @@ the safest choice regardless.
 
 ---
 
-## Reporting back (for an automated agent)
+## Reporting back
 
 When you have a diagnosis, produce:
 1. The failing `code`(s) and the single root cause.

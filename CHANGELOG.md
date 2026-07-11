@@ -52,8 +52,8 @@ Fixes from a fresh scientific/HPC review, plus a broadened HPC validation suite.
 
 ### HPC-scale review & hardening (this pass)
 
-Fixes and features from a code-review pass focused on large-scale atomistic MD on
-CPU/GPU HPC clusters (SLURM/PBS). Full findings: `docs/code_review.md`.
+Fixes and features focused on large-scale atomistic MD on CPU/GPU HPC clusters
+(SLURM/PBS).
 
 - **SLURM poller fix (critical):** `squeue --array` output (`<jobid>_<taskid>`)
   was never matched by the "job active?" check, so the driver gave up before
@@ -96,7 +96,7 @@ CPU/GPU HPC clusters (SLURM/PBS). Full findings: `docs/code_review.md`.
 - **HPC test suite:** `hpc_tests/` — SLURM + PBS × CPU + GPU end-to-end validation
   with preflight, result validator, and a debugging playbook (`DEBUGGING.md`).
 - **Docs:** `docs/hpc_scaling.md` (execution model, limits, and a WESTPA
-  comparison/roadmap); `docs/code_review.md` (full findings & SOTA roadmap).
+  comparison/roadmap).
 
 ### Added
 

@@ -66,7 +66,7 @@ trails_md/
   core.py                   Main adaptive sampling controller
   engines/                  OpenMM, GROMACS, and Amber backends
   spaces/                   Feature extraction and adaptive latent spaces
-  spawners/                 Density, Voronoi, LOF, and farthest-point spawning
+  spawners/                 Density, Voronoi, LOF, FPS, WE, and MSM spawning
   binning/                  Regular-grid and Voronoi binning utilities
   checkpoints/              Checkpoint save/load logic
   paths.py, path_cli.py     Lineage-aware path reconstruction
@@ -153,16 +153,19 @@ Main adaptive runner:
 
 ```text
 usage: trails-md [-h] [--config CONFIG] [--iterations ITERATIONS]
-                   [--resume [RESUME]] [--check]
+                   [--resume [RESUME]] [--ignore-missing-history] [--check]
                    [--log-level {CRITICAL,ERROR,WARNING,INFO,DEBUG}]
 
 options:
   --config CONFIG       YAML config path. Relative paths inside it are resolved
                         from this file.
-  --iterations N        Number of adaptive iterations to run.
+  --iterations N        Number of adaptive iterations to run (default 1).
   --resume [RESUME]     Resume from latest checkpoint, or from checkpoints/iter_N.
+  --ignore-missing-history
+                        On resume, tolerate a broken delta-checkpoint history
+                        chain instead of aborting (use with care).
   --check               Validate inputs and executables, then exit before MD.
-  --log-level LEVEL     Python logging verbosity.
+  --log-level LEVEL     Python logging verbosity (default WARNING).
 ```
 
 Connected path post-processing:
@@ -172,6 +175,7 @@ usage: trails-md-path --run-dir RUN_DIR --topology TOPOLOGY
                         [--start START] [--end END] [--output OUTPUT]
                         [--pairs-file PAIRS_FILE] [--output-dir OUTPUT_DIR]
                         [--metadata METADATA] [--checkpoint CHECKPOINT]
+                        [--ignore-missing-history]
 ```
 
 Exploration log generation:
@@ -230,6 +234,8 @@ Trails-MD currently supports:
 - `voronoi`: KMeans-backed Voronoi cells with exact clipped polygon areas.
 - `lof`: local-outlier-factor based frame selection.
 - `fps`: farthest-point sampling for geometric spread.
+- `we`: weighted-ensemble split/merge resampling (experimental).
+- `msm`: MSM-guided least-counts spawning (experimental; see [`docs/msm.md`](docs/msm.md)).
 
 Voronoi note: `voronoi_clusters` controls the restart-selection partition.
 The regular `n_bins` grid is still used for run-log coverage diagnostics.
@@ -247,6 +253,10 @@ learned CV methods are available through a single registry
 | `tica`       | Time-lagged ICA              | deeptime            | linear, dynamics-aware               |
 | `tvae`       | Time-lagged VAE              | deeptime + torch    | nonlinear bottleneck                 |
 | `deep-tica`  | Deep (nonlinear) TICA        | mlcolvar (optional) | `pip install "trails-md[deep-tica]"` |
+
+Three further methods are available as experimental extension points through the
+same registry: `vampnet` (deeptime + torch), `spib` (torch), and `deep-lda`
+(mlcolvar). See [`docs/cv_methods.md`](docs/cv_methods.md) for all eight.
 
 When a model is retrained, the full feature history is reprojected into the
 updated latent space before spawning, so selection always reflects the current
