@@ -91,6 +91,8 @@ class SchedulerBackend(ExecutionBackend):
         max_array_size: int | None = None,
         wait_timeout: float | None = None,
         marker_grace: float = 30.0,
+        submit_retry_limit: int = 20,
+        submit_retry_interval: float = 15.0,
         module_loads: list[str] | None = None,
         extra_directives: list[str] | None = None,
         job_name: str = "trails-md",
@@ -124,6 +126,12 @@ class SchedulerBackend(ExecutionBackend):
         # How long to keep re-checking result markers after the job leaves the
         # queue, to absorb shared-filesystem (NFS/Lustre) metadata lag.
         self.marker_grace = marker_grace
+        # Retry a *transient* submit rejection (per-user QOS/association submit-job
+        # limit, scheduler rate limit, transient RPC error) instead of aborting the
+        # campaign; a permanent rejection still fails fast. See
+        # ``_is_transient_submit_error``.
+        self.submit_retry_limit = submit_retry_limit
+        self.submit_retry_interval = submit_retry_interval
         self.module_loads = list(module_loads or [])
         self.extra_directives = list(extra_directives or [])
         self.job_name = job_name
@@ -241,20 +249,7 @@ class SchedulerBackend(ExecutionBackend):
         script_path = jobdir / f"submit_{tag}.sh"
         script_path.write_text(script)
 
-        try:
-            proc = self._run_command(
-                self._submit_command(script_path), self.submit_timeout
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"{type(self).__name__} submission timed out after "
-                f"{self.submit_timeout}s"
-            ) from exc
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"{type(self).__name__} submission failed (exit {proc.returncode}): "
-                f"{proc.stderr.strip()}"
-            )
+        proc = self._submit_with_retry(script_path)
         job_id = self._parse_job_id(proc.stdout)
         if not job_id:
             raise RuntimeError(
@@ -262,6 +257,78 @@ class SchedulerBackend(ExecutionBackend):
                 f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
             )
         self._wait_for_completion(job_id, [result_files[i] for i in chunk])
+
+    # Substrings (lower-cased) that mark a submit rejection as *transient* — a
+    # per-user QOS/association submit-job limit, a scheduler rate/size limit, or a
+    # temporary controller/RPC hiccup — i.e. worth retrying rather than aborting.
+    _TRANSIENT_SUBMIT_MARKERS = (
+        "qosmaxsubmitjobperuserlimit",
+        "qosmaxsubmitjob",
+        "assocmaxsubmitjoblimit",
+        "maxsubmitjobsperuser",
+        "job submit limit",
+        "reached jobs per user limit",
+        "socket timed out",
+        "socket timed out on send/recv",
+        "slurm_receive_msg",
+        "slurmctld is down",
+        "unable to contact slurm controller",
+        "try again",
+        "temporarily unavailable",
+        "resource temporarily",
+        "rate limit",
+    )
+
+    @classmethod
+    def _is_transient_submit_error(cls, stderr: str) -> bool:
+        """Whether a failed submission should be retried rather than fatal.
+
+        Transient = a per-user submit-job cap (QOS/association) or a scheduler
+        rate/RPC hiccup that clears on its own as earlier work drains from the
+        queue. Permanent errors (invalid partition/QOS, malformed directives)
+        return ``False`` so they still fail fast.
+        """
+        text = (stderr or "").lower()
+        return any(marker in text for marker in cls._TRANSIENT_SUBMIT_MARKERS)
+
+    def _submit_with_retry(self, script_path: Path):
+        """Submit one array job, retrying transient rejections with backoff.
+
+        A transient rejection (``_is_transient_submit_error``) is retried up to
+        ``submit_retry_limit`` times, ``submit_retry_interval`` seconds apart, so a
+        busy user's per-QOS submit-job limit does not abort a campaign that has
+        already produced good iterations. Timeouts of the submit RPC itself are
+        treated as transient. Anything else raises immediately.
+        """
+        attempts = max(0, self.submit_retry_limit) + 1
+        last_detail = ""
+        for attempt in range(attempts):
+            try:
+                proc = self._run_command(
+                    self._submit_command(script_path), self.submit_timeout
+                )
+            except subprocess.TimeoutExpired:
+                last_detail = f"submit RPC timed out after {self.submit_timeout}s"
+                transient = True
+            else:
+                if proc.returncode == 0:
+                    return proc
+                last_detail = f"exit {proc.returncode}: {proc.stderr.strip()}"
+                transient = self._is_transient_submit_error(proc.stderr)
+            if not transient or attempt == attempts - 1:
+                break
+            logger.warning(
+                "%s submission rejected (%s); transient — retry %d/%d in %.0fs.",
+                type(self).__name__,
+                last_detail,
+                attempt + 1,
+                self.submit_retry_limit,
+                self.submit_retry_interval,
+            )
+            self._sleep(self.submit_retry_interval)
+        raise RuntimeError(
+            f"{type(self).__name__} submission failed ({last_detail})"
+        )
 
     def _render_script(self, n_tasks: int, manifest: Path, logdir: Path) -> str:
         lines = ["#!/bin/bash"]

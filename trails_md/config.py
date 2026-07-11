@@ -306,6 +306,15 @@ class ExecutionConfig(BaseModel):
     # Seconds to keep re-checking result markers after the job leaves the queue,
     # absorbing shared-filesystem (NFS/Lustre/GPFS) metadata lag.
     marker_grace: float = 30.0
+    # A *transient* submit rejection (a per-user QOS/association submit-job limit
+    # such as SLURM `QOSMaxSubmitJobPerUserLimit`, or a scheduler rate limit /
+    # transient RPC error) must not abort the whole campaign after good iterations.
+    # The submitter retries such rejections up to `submit_retry_limit` times,
+    # waiting `submit_retry_interval` seconds between attempts, before giving up.
+    # A *permanent* rejection (invalid partition/QOS, malformed script) still fails
+    # fast. Set `submit_retry_limit: 0` to restore the fail-immediately behaviour.
+    submit_retry_limit: int = 20
+    submit_retry_interval: float = 15.0
     module_loads: list[str] = []  # `module load ...` lines for job scripts
     extra_directives: list[str] = []  # raw #SBATCH / #PBS lines
     job_name: str = "trails-md"
@@ -318,7 +327,7 @@ class ExecutionConfig(BaseModel):
             raise ValueError("execution.backend must be 'local', 'slurm', or 'pbs'")
         return value
 
-    @field_validator("cpus_per_task", "gpus_per_task", "max_retries")
+    @field_validator("cpus_per_task", "gpus_per_task", "max_retries", "submit_retry_limit")
     @classmethod
     def _non_negative_int(cls, value: int) -> int:
         if value < 0:
@@ -332,7 +341,7 @@ class ExecutionConfig(BaseModel):
             raise ValueError("must be > 0 when set")
         return value
 
-    @field_validator("poll_interval", "submit_timeout", "marker_grace")
+    @field_validator("poll_interval", "submit_timeout", "marker_grace", "submit_retry_interval")
     @classmethod
     def _positive_float(cls, value: float) -> float:
         if value <= 0:

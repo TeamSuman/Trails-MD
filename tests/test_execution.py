@@ -201,6 +201,62 @@ def test_scheduler_submit_failure_raises(tmp_path):
         backend.execute(_tasks(tmp_path, ["ok"]))
 
 
+def test_scheduler_submit_retries_transient_qos_limit(tmp_path):
+    """A per-user QOS submit-job cap is transient — retry, do not abort."""
+    inner = _fake_runner()
+    calls = {"submit": 0, "sleeps": []}
+
+    def runner(cmd, timeout):
+        if cmd[0] in ("sbatch", "qsub"):
+            calls["submit"] += 1
+            if calls["submit"] == 1:  # first attempt rejected by the QOS cap
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        "sbatch: error: QOSMaxSubmitJobPerUserLimit\n"
+                        "sbatch: error: Batch job submission failed: Job violates "
+                        "accounting/QOS policy (job submit limit ...)"
+                    ),
+                )
+        return inner(cmd, timeout)
+
+    backend = SlurmBackend(
+        command_runner=runner,
+        sleep_fn=lambda s: calls["sleeps"].append(s),
+        max_retries=0,
+        submit_retry_limit=3,
+        submit_retry_interval=5.0,
+        python_executable="python",
+    )
+    results = backend.execute(_tasks(tmp_path, ["ok", "ok"]))
+    assert results == [True, True]  # succeeds after the transient rejection clears
+    assert calls["submit"] == 2  # rejected once, then submitted
+    assert calls["sleeps"] == [5.0]  # backed off exactly once
+
+
+def test_scheduler_submit_permanent_error_fails_fast(tmp_path):
+    """A permanent rejection (invalid QOS) must fail immediately, no retries."""
+    calls = {"sleeps": 0}
+
+    def runner(cmd, timeout):
+        if cmd[0] in ("sbatch", "qsub"):
+            return SimpleNamespace(
+                returncode=1, stdout="", stderr="Invalid qos specification"
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    backend = SlurmBackend(
+        command_runner=runner,
+        sleep_fn=lambda s: calls.__setitem__("sleeps", calls["sleeps"] + 1),
+        submit_retry_limit=5,
+        submit_retry_interval=1.0,
+    )
+    with pytest.raises(RuntimeError, match="submission failed"):
+        backend.execute(_tasks(tmp_path, ["ok"]))
+    assert calls["sleeps"] == 0  # no backoff for a permanent error
+
+
 # ── script rendering & job-id parsing ───────────────────────────────────────
 def test_slurm_script_directives(tmp_path):
     backend = SlurmBackend(

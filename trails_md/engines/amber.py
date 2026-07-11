@@ -158,6 +158,11 @@ class AmberEngine(MDEngine):
         self.topology_file: Path | None = None
         self.start_coords_file: Path | None = None
         self.positions: str | None = None  # str path for first-iteration walkers
+        # Whether the system is periodic (has a unit cell). Detected from the
+        # prmtop's IFBOX pointer in prepare(); a non-periodic (vacuum / implicit
+        # solvent) system must use ntb=0 or pmemd aborts with "Box parameters not
+        # found in inpcrd file!". Defaults True for backward compatibility.
+        self.is_periodic: bool = True
 
     # ------------------------------------------------------------------
     # MDEngine interface
@@ -189,14 +194,49 @@ class AmberEngine(MDEngine):
                 f"Amber coordinate file not found: {self.start_coords_file}"
             )
 
+        # Detect periodicity from the prmtop so vacuum / implicit-solvent systems
+        # get ntb=0 (see _write_input). Detection failures fall back to periodic.
+        self.is_periodic = self._detect_periodic(self.topology_file)
+
         # Expose the initial coordinate path so the runner can seed walkers
         # (mirrors OpenMMEngine.positions for the first iteration).
         self.positions = str(self.start_coords_file)
         logging.info(
-            "AmberEngine prepared: top=%s  conf=%s",
+            "AmberEngine prepared: top=%s  conf=%s  periodic=%s",
             self.topology_file,
             self.start_coords_file,
+            self.is_periodic,
         )
+
+    @staticmethod
+    def _detect_periodic(prmtop: Path) -> bool:
+        """Whether an Amber prmtop describes a periodic system (IFBOX > 0).
+
+        Reads the ``POINTERS`` section (31 integers); ``IFBOX`` is the 28th value
+        (0-indexed 27). Returns ``True`` when it cannot be parsed, preserving the
+        historical periodic-only behaviour.
+        """
+        IFBOX = 27  # 0-indexed position of IFBOX within the 31 POINTERS
+        try:
+            lines = Path(prmtop).read_text().splitlines()
+        except OSError:
+            return True
+        for idx, line in enumerate(lines):
+            if line.startswith("%FLAG POINTERS"):
+                ints: list[int] = []
+                j = idx + 1
+                while j < len(lines) and len(ints) <= IFBOX:
+                    if lines[j].startswith("%FORMAT"):
+                        j += 1
+                        continue
+                    if lines[j].startswith("%"):
+                        break
+                    ints.extend(int(tok) for tok in lines[j].split())
+                    j += 1
+                if len(ints) > IFBOX:
+                    return ints[IFBOX] > 0
+                return True
+        return True
 
     def run_production(
         self,
@@ -383,13 +423,32 @@ class AmberEngine(MDEngine):
 
         ``{steps}``, ``{dt}``, ``{temp}``, ``{stride}``, ``{ntp}``, ``{ntb}``
         """
-        ntp = 1 if self.npt else 0
-        ntb = 2 if self.npt else 1
+        if not self.is_periodic:
+            # Vacuum / implicit-solvent: no unit cell. ntb=0 (no periodicity),
+            # no non-bonded cutoff (cut very large), and no coordinate wrapping.
+            # NPT is meaningless without a box, so it is force-disabled.
+            if self.npt:
+                logging.warning(
+                    "AmberEngine: npt requested for a non-periodic system; "
+                    "ignoring (no barostat without a unit cell)."
+                )
+            ntp = 0
+            ntb = 0
+            cutoff = 999.0
+            iwrap = 0
+            pres_line = ""
+        else:
+            ntp = 1 if self.npt else 0
+            ntb = 2 if self.npt else 1
+            cutoff = 9.0
+            iwrap = 1
+            pres_line = (
+                f"  pres0={self.pressure:.4f}, barostat=2, taup=2.0,"
+                if self.npt
+                else ""
+            )
         trajectory_format = trajectory_format or self._resolved_trajectory_format()
         ioutfm = 0 if trajectory_format == "ascii" else 1
-        pres_line = (
-            f"  pres0={self.pressure:.4f}, barostat=2, taup=2.0," if self.npt else ""
-        )
 
         if self.amber_input_file is not None:
             template_path = Path(self.amber_input_file)
@@ -434,8 +493,8 @@ class AmberEngine(MDEngine):
                 f"  ntt=3, gamma_ln=1.0,\n"
                 f"  ig={-1 if self.seed is None else self.seed},\n"
                 f"  ntb={ntb}, ntp={ntp},{pres_line}\n"
-                f"  cut=9.0,\n"
-                f"  ntpr={steps}, ntwx={stride}, iwrap=1,\n"
+                f"  cut={cutoff:.1f},\n"
+                f"  ntpr={steps}, ntwx={stride}, iwrap={iwrap},\n"
                 f"  ioutfm={ioutfm}, ntxo=2,\n"
                 " /\n"
             )
