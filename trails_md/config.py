@@ -285,6 +285,11 @@ class ExecutionConfig(BaseModel):
     walltime: str = "01:00:00"
     cpus_per_task: int = 1
     gpus_per_task: int = 0
+    # Explicit SLURM generic-resource request per array element, e.g. "gpu:1".
+    # Some sites' gpu partitions require --gres (or --gpus) and reject a bare
+    # --gpus-per-task ("you must request at least one GPU"); set `gres` there and
+    # leave `gpus_per_task: 0`. Emitted verbatim as `#SBATCH --gres=<gres>`.
+    gres: str | None = None
     memory: str | None = None  # e.g. "8G"
     # Robustness / polling.
     max_retries: int = 1  # resubmit failed walkers up to this many times

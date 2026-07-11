@@ -83,6 +83,7 @@ class SchedulerBackend(ExecutionBackend):
         walltime: str = "01:00:00",
         cpus_per_task: int = 1,
         gpus_per_task: int = 0,
+        gres: str | None = None,
         memory: str | None = None,
         max_retries: int = 1,
         poll_interval: float = 30.0,
@@ -107,6 +108,7 @@ class SchedulerBackend(ExecutionBackend):
         self.walltime = walltime
         self.cpus_per_task = cpus_per_task
         self.gpus_per_task = gpus_per_task
+        self.gres = gres
         self.memory = memory
         self.max_retries = max_retries
         self.poll_interval = poll_interval

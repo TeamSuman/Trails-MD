@@ -271,6 +271,15 @@ def test_slurm_script_directives(tmp_path):
     assert "trails_md.execution.run_task" in script
 
 
+def test_slurm_gres_directive(tmp_path):
+    # Sites whose gpu partition requires --gres (rejecting a bare --gpus-per-task)
+    # request GPUs via `gres` with gpus_per_task left 0.
+    backend = SlurmBackend(partition="gpu", gpus_per_task=0, gres="gpu:1")
+    script = backend._render_script(2, tmp_path / "m.txt", tmp_path / "logs")
+    assert "#SBATCH --gres=gpu:1" in script
+    assert "--gpus-per-task" not in script  # not emitted when gpus_per_task=0
+
+
 def test_pbs_script_directives(tmp_path):
     backend = PBSBackend(cpus_per_task=4, gpus_per_task=2, memory="8G")
     script = backend._render_script(3, tmp_path / "m.txt", tmp_path / "logs")
