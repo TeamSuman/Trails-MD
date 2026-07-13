@@ -3,9 +3,8 @@
 
 Runs each major feature on the fast alanine-dipeptide workloads using the
 **local** execution backend (no cluster), then validates each run with
-``checks/validate_results.py``. This is the tool a locally-running Claude Code
-instance uses to exercise "all major features" *before* spending cluster time,
-to reproduce a bug, or to confirm a fix.
+``checks/validate_results.py``. Use it to exercise "all major features" *before*
+spending cluster time, to reproduce a bug, or to confirm a fix.
 
 Each feature is the same tiny workload with one axis changed (engine, spawner,
 CV space, MSM, feature selection, adaptive binning, resume, path). A feature

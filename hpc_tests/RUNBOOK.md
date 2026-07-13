@@ -1,6 +1,6 @@
 # Trails-MD test runbook
 
-An ordered procedure for a **locally-running Claude Code instance** (or a person)
+An ordered procedure for an operator (or an automated test runner)
 to (1) validate **all major features** without a cluster, (2) reproduce the known
 correctness fixes, and (3) run and triage the **SLURM/PBS** feature matrix on a
 cluster. Every step writes a structured JSON report so a failure can be localized
@@ -165,11 +165,7 @@ pass `--amber-format ascii` to `validate_results.py` if you force ASCII output.
 
 ---
 
-> **Driving this from an agent on the cluster?** A ready-to-paste, self-contained
-> prompt for a Claude Code instance on the SLURM cluster is in
-> [`CLUSTER_AGENT_PROMPT.md`](CLUSTER_AGENT_PROMPT.md).
-
-## 5. Reporting back (for an automated agent)
+## 5. Reporting back
 
 When you have a diagnosis, produce:
 

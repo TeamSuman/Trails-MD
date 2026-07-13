@@ -12,7 +12,7 @@
 system:
   conf_file: start.gro          # coordinates (.gro/.pdb/.crd/...)
   top_file: topol.top           # topology
-  topology: gromacs             # gromacs | amber | charmm
+  topology: gromacs             # advisory only; format is inferred from extensions
   # system_file: system.py      # optional: custom OpenMM System builder
   # project_file: project.py    # required for space_mode: fixed (defines extract_cvs)
   trajectory_topology_file: start.gro
@@ -24,7 +24,7 @@ engine:
   platform_name: CUDA           # use CPU if OpenMM has no registered CUDA platform
   precision: mixed              # mixed | single | double
   temperature: 300.0            # Kelvin
-  pressure: 1.0                 # bar
+  pressure: 1.0                 # atm (OpenMM MonteCarloBarostat)
   dt: 0.002                     # ps
   npt: false                    # constant-pressure ensemble
   equilibrate: false

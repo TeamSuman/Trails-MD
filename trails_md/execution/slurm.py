@@ -32,6 +32,10 @@ class SlurmBackend(SchedulerBackend):
             d.append(f"#SBATCH --account={self.account}")
         if self.gpus_per_task > 0:
             d.append(f"#SBATCH --gpus-per-task={self.gpus_per_task}")
+        if self.gres:
+            # Some sites' gpu partitions require --gres (or --gpus) and reject a
+            # bare --gpus-per-task. Emitted verbatim, e.g. "gpu:1".
+            d.append(f"#SBATCH --gres={self.gres}")
         if self.memory:
             d.append(f"#SBATCH --mem={self.memory}")
         d += [line for line in self.extra_directives]

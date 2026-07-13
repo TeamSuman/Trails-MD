@@ -10,9 +10,11 @@ from informative regions, and repeats the cycle.
 - **Engine-agnostic walkers.** OpenMM, GROMACS, and Amber share the same
   adaptive loop.
 - **Fixed or learned sampling spaces.** User-defined physical CVs, PCA, TICA,
-  TVAE, and Deep-TICA, swappable at configuration time.
+  TVAE, and Deep-TICA, swappable at configuration time (plus experimental
+  VAMPnet, SPIB, and Deep-LDA — see [Collective variables](cv_methods.md)).
 - **Interchangeable spawning policies.** Density, Voronoi,
-  local-outlier-factor, and farthest-point selection.
+  local-outlier-factor, and farthest-point selection (plus experimental
+  weighted-ensemble and MSM-guided spawning — see [Concepts](concepts.md)).
 - **Lineage-aware exploration.** Every spawned frame stores its parent-child
   ancestry, so connected transition pathways can be reconstructed from
   otherwise disjoint exploration stages.
@@ -31,7 +33,7 @@ from informative regions, and repeats the cycle.
   train or update the CV if space_mode is a learned
   method (PCA / TICA / TVAE / Deep-TICA)
               |
-  spawn new walkers (density / Voronoi / LOF / FPS)
+  spawn new walkers (density / Voronoi / LOF / FPS / WE / MSM)
               |
   iteration budget reached, or bin occupancy
   plateaued? --- yes ---> stop

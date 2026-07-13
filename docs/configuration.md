@@ -11,7 +11,7 @@ at startup. Below, only non-obvious defaults are noted — see
 | --- | --- | --- |
 | `conf_file` | — | Coordinate file (`.gro`, `.pdb`, …). |
 | `top_file` | — | Topology file. |
-| `topology` | `amber` | `gromacs` \| `amber` \| `charmm`. |
+| `topology` | `amber` | Reserved metadata field; the OpenMM engine infers the input format from file extensions, so this is currently a no-op. |
 | `system_file` | `None` | Optional Python module building a custom OpenMM `System`. |
 | `project_file` | `None` | Python module with `extract_cvs(...)` for fixed CVs. |
 | `trajectory_topology_file` | `None` | Topology used to read trajectories (defaults to `top_file`). |
@@ -22,7 +22,7 @@ at startup. Below, only non-obvious defaults are noted — see
 | Key | Default | Description |
 | --- | --- | --- |
 | `md_engine` | `openmm` | `openmm` \| `gromacs` \| `amber`. |
-| `platform_name` | `CUDA` | OpenMM platform (`CUDA`, `CPU`, `OpenCL`, `Reference`). |
+| `platform_name` | `CUDA` | OpenMM platform (`CUDA`, `OpenCL`, `HIP`, `CPU`; `Reference` = unaccelerated fallback). |
 | `precision` | `mixed` | OpenMM precision. |
 | `temperature` / `pressure` / `dt` | `300` / `1.0` / `0.002` | Thermostat / barostat / timestep. |
 | `npt` / `equilibrate` | `false` / `false` | Constant-pressure / pre-equilibration. |
@@ -60,8 +60,9 @@ at startup. Below, only non-obvious defaults are noted — see
 
 ## `space_mode` and adaptive model
 
-`space_mode`: `fixed` \| `pca` \| `tica` \| `tvae` \| `deep-tica`. For learned
-modes:
+`space_mode`: `fixed` \| `pca` \| `tica` \| `tvae` \| `deep-tica` (+ experimental
+`vampnet` \| `spib` \| `deep-lda`; see [Collective variables](cv_methods.md)). For
+learned modes:
 
 | Key | Default | Description |
 | --- | --- | --- |
@@ -83,7 +84,9 @@ Where walkers run (workstation vs HPC). See [Execution](execution.md).
 | `backend` | `local` | `local` \| `slurm` \| `pbs`. |
 | `partition` / `account` / `walltime` | `None` / `None` / `01:00:00` | Scheduler resources. |
 | `cpus_per_task` / `gpus_per_task` / `memory` | `1` / `0` / `None` | Per-walker resources. |
+| `gres` | `None` | SLURM `--gres` per array element (e.g. `gpu:1`). Use with `gpus_per_task: 0` on sites whose GPU partition requires `--gres`/`--gpus` and rejects `--gpus-per-task`. |
 | `max_retries` | `1` | Resubmit failed walkers up to N times. |
+| `submit_retry_limit` / `submit_retry_interval` | `20` / `15` | Retries + backoff (s) for *transient* submit rejections (per-user QOS/association submit-job caps, scheduler rate limits); permanent errors still fail fast. |
 | `poll_interval` / `submit_timeout` | `30` / `60` | Polling / command timeouts (s). |
 | `max_in_flight` | `None` | Cap concurrent array elements (SLURM `%N`); set for large batches. |
 | `max_array_size` | `None` | Split batches larger than this into sub-arrays (beat SLURM `MaxArraySize` / PBS `max_array_size`). |

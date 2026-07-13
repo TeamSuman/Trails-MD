@@ -285,6 +285,11 @@ class ExecutionConfig(BaseModel):
     walltime: str = "01:00:00"
     cpus_per_task: int = 1
     gpus_per_task: int = 0
+    # Explicit SLURM generic-resource request per array element, e.g. "gpu:1".
+    # Some sites' gpu partitions require --gres (or --gpus) and reject a bare
+    # --gpus-per-task ("you must request at least one GPU"); set `gres` there and
+    # leave `gpus_per_task: 0`. Emitted verbatim as `#SBATCH --gres=<gres>`.
+    gres: str | None = None
     memory: str | None = None  # e.g. "8G"
     # Robustness / polling.
     max_retries: int = 1  # resubmit failed walkers up to this many times
@@ -306,6 +311,15 @@ class ExecutionConfig(BaseModel):
     # Seconds to keep re-checking result markers after the job leaves the queue,
     # absorbing shared-filesystem (NFS/Lustre/GPFS) metadata lag.
     marker_grace: float = 30.0
+    # A *transient* submit rejection (a per-user QOS/association submit-job limit
+    # such as SLURM `QOSMaxSubmitJobPerUserLimit`, or a scheduler rate limit /
+    # transient RPC error) must not abort the whole campaign after good iterations.
+    # The submitter retries such rejections up to `submit_retry_limit` times,
+    # waiting `submit_retry_interval` seconds between attempts, before giving up.
+    # A *permanent* rejection (invalid partition/QOS, malformed script) still fails
+    # fast. Set `submit_retry_limit: 0` to restore the fail-immediately behaviour.
+    submit_retry_limit: int = 20
+    submit_retry_interval: float = 15.0
     module_loads: list[str] = []  # `module load ...` lines for job scripts
     extra_directives: list[str] = []  # raw #SBATCH / #PBS lines
     job_name: str = "trails-md"
@@ -318,7 +332,7 @@ class ExecutionConfig(BaseModel):
             raise ValueError("execution.backend must be 'local', 'slurm', or 'pbs'")
         return value
 
-    @field_validator("cpus_per_task", "gpus_per_task", "max_retries")
+    @field_validator("cpus_per_task", "gpus_per_task", "max_retries", "submit_retry_limit")
     @classmethod
     def _non_negative_int(cls, value: int) -> int:
         if value < 0:
@@ -332,7 +346,7 @@ class ExecutionConfig(BaseModel):
             raise ValueError("must be > 0 when set")
         return value
 
-    @field_validator("poll_interval", "submit_timeout", "marker_grace")
+    @field_validator("poll_interval", "submit_timeout", "marker_grace", "submit_retry_interval")
     @classmethod
     def _positive_float(cls, value: float) -> float:
         if value <= 0:

@@ -35,7 +35,7 @@ space_mode: tvae
 adaptive_feature_type: phi_psi
 aggregate_memory: true
 max_adaptive_memory_frames: 20000000
-outdir: runs/adaptive_phi_psi_pca
+outdir: runs/adaptive_phi_psi_tvae
 random_seed: 7
 checkpoint_freq: 1
 save_features: true

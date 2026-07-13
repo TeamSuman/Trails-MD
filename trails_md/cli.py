@@ -99,7 +99,7 @@ def run(
             break
 
     # Persist a machine-readable campaign outcome next to the outputs so tooling
-    # (validators, analysis, an HPC agent benchmarking convergence) does not have
+    # (validators, analysis, an HPC benchmarking workflow) does not have
     # to scrape the driver log. Written for every backend since cli.run is the
     # single campaign entry point.
     import json

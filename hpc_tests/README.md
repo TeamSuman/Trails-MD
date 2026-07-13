@@ -8,7 +8,7 @@ scheduler backends cannot be fully exercised off-cluster (the unit tests in
 filesystem-lag, and resource-request problems.
 
 Workflow for each test: **preflight → `trails-md --check` → run → validate**,
-with structured JSON written to `results/` so a person *or an automated agent*
+with structured JSON written to `results/` so a person *or automated CI*
 can localize any failure using [`DEBUGGING.md`](DEBUGGING.md).
 
 ## Test matrix
