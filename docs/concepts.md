@@ -12,8 +12,8 @@ the next iteration's walkers from. Spawners:
 | `voronoi` | Restart from sparse Voronoi (k-means) cells; scales better than a grid in higher-dimensional CV spaces. |
 | `lof` | Restart from statistical outliers (local outlier factor). |
 | `fps` | Farthest-point sampling for maximal coverage. |
-| `we` | Weighted-ensemble split/merge resampling. **Experimental** (beyond manuscript scope); see [MSM & kinetic seeding](msm.md) on weight validity. |
-| `msm` | MSM least-counts / uncertainty-driven spawning (needs `msm.enabled`). **Experimental** (beyond manuscript scope). |
+| `we` | Weighted-ensemble split/merge resampling, **conserving total statistical weight** (`we_target_per_bin`). Note that the default MB velocity resampling breaks exact trajectory continuity — disable it, or use a dedicated WE package, if you need formal WE rate guarantees. |
+| `msm` | MSM-guided spawning (needs `msm.enabled`): least-counts × slow-mode leverage × outflow uncertainty (`msm.spawn_alpha`, `spawn_leverage`, `spawn_uncertainty`). Targets the states whose sampling most improves the *kinetic model*, not merely the geometrically sparse ones. |
 
 Any spawner can also be pointed toward a target region of the CV space
 (`search_mode: target`), balancing exploration with progress toward the
@@ -25,7 +25,7 @@ A run uses either:
 
 - **Fixed CVs** (`space_mode: fixed`) — a user `project_file` returning physical
   CVs (dihedrals, distances, …), or
-- **Learned CVs** (`space_mode: pca | tica | tvae | deep-tica`) — trained on
+- **Learned CVs** (`space_mode: pca | tica | tvae | deep-tica | vampnet | spib | deep-lda`) — trained on
   the fly from input features and periodically retrained (`retrain_freq`).
   See [Collective variables](cv_methods.md).
 

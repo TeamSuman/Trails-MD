@@ -32,7 +32,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from .spatial import BinTable, RegularBinner, padded_bounds
+from .spatial import BinTable, RegularBinner, bucket_frames, padded_bounds
 
 
 def _smooth(values: np.ndarray, window: int) -> np.ndarray:
@@ -67,13 +67,7 @@ def _grid_bintable(coords, edges, target=None) -> BinTable:
         idx[:, a] = np.clip(pos, 0, nbin[a] - 1)
 
     ids = list(np.ndindex(*nbin))
-    id_to_row = {t: i for i, t in enumerate(ids)}
-    populations = np.zeros(len(ids), dtype=int)
-    populated_data: list[list[int]] = [[] for _ in ids]
-    for frame, cell in enumerate(map(tuple, idx)):
-        row = id_to_row[cell]
-        populations[row] += 1
-        populated_data[row].append(frame)
+    populations, populated_data = bucket_frames(idx, nbin)
 
     centers = np.array(
         [
@@ -157,41 +151,131 @@ class AdaptiveBinner(ABC):
 
 
 class GradientBinner(AdaptiveBinner):
-    """Equi-resistance edges: dense where the sampled density is low (barriers)."""
+    """Equi-resistance edges: dense where the sampled density is low (barriers).
 
-    def __init__(self, *args, n_fine: int = 100, smoothing: int = 3, **kw):
+    Boundaries are placed at equal increments of the "resistance"
+    ``∫ 1/P(x) dx ∝ ∫ exp(βF(x)) dx``, so bins bunch up where the sampled density is
+    low — i.e. across barriers — and spread out in well-sampled basins.
+
+    Two safeguards matter in practice and were added after benchmarking:
+
+    * Edges are laid out across the **occupied** range only. Over the full configured
+      domain the unvisited region has zero density, so ``1/P`` diverges there and
+      swallows the entire edge budget: the occupied region then collapses into one or
+      two enormous bins and the frontier is *diluted* rather than resolved — the exact
+      opposite of the intent.
+    * The resistance is **clipped** to ``max_resistance`` times its median, so a single
+      near-empty slice cannot monopolise the edges either.
+    """
+
+    def __init__(self, *args, n_fine: int = 100, smoothing: int = 3,
+                 max_resistance: float = 50.0, **kw):
         super().__init__(*args, **kw)
         self.n_fine = int(n_fine)
         self.smoothing = int(smoothing)
-
-    def _axis_edges(self, col, lo, hi, nb):
-        n_fine = max(self.n_fine, nb * 4)
-        hist, fine = np.histogram(col, bins=n_fine, range=(lo, hi))
-        density = _smooth(hist.astype(float), self.smoothing) + 1e-9
-        resistance = 1.0 / density  # ∝ exp(βF)
-        cum = np.concatenate([[0.0], np.cumsum(resistance * np.diff(fine))])
-        if cum[-1] <= 0:
-            return np.linspace(lo, hi, nb + 1)
-        targets = np.linspace(0.0, cum[-1], nb + 1)
-        return np.interp(targets, cum, fine)
-
-
-class MABinner(AdaptiveBinner):
-    """Minimal-Adaptive-Binning style: uniform middle + narrow front footholds."""
+        self.max_resistance = float(max_resistance)
 
     def _axis_edges(self, col, lo, hi, nb):
         occ_lo, occ_hi = float(col.min()), float(col.max())
-        if nb < 4 or occ_hi <= occ_lo:
+        if nb < 3 or occ_hi <= occ_lo:
             return np.linspace(lo, hi, nb + 1)
-        inner = np.linspace(occ_lo, occ_hi, nb - 1)
-        # Split the two outermost occupied bins to give footholds at the fronts.
-        foot_lo = 0.5 * (inner[0] + inner[1])
-        foot_hi = 0.5 * (inner[-2] + inner[-1])
-        return np.unique(
-            np.concatenate(
-                [[lo], inner[:1], [foot_lo], inner[1:-1], [foot_hi], inner[-1:], [hi]]
-            )
-        )
+
+        n_fine = max(self.n_fine, nb * 4)
+        hist, fine = np.histogram(col, bins=n_fine, range=(occ_lo, occ_hi))
+        density = _smooth(hist.astype(float), self.smoothing)
+        density = np.maximum(density, 1e-9)
+        resistance = 1.0 / density                       # ∝ exp(βF)
+        cap = self.max_resistance * float(np.median(resistance))
+        resistance = np.minimum(resistance, cap)
+
+        cum = np.concatenate([[0.0], np.cumsum(resistance * np.diff(fine))])
+        if cum[-1] <= 0:
+            return np.linspace(lo, hi, nb + 1)
+        # nb-1 interior edges across the occupied range; keep the domain bounds outside
+        targets = np.linspace(0.0, cum[-1], nb - 1)
+        inner = np.interp(targets, cum, fine)
+        return np.unique(np.concatenate([[lo], inner, [hi]]))
+
+
+class MABinner(AdaptiveBinner):
+    """Minimal Adaptive Binning (Torrillo, Bogetti & Chong, *J. Phys. Chem. A* 2021).
+
+    Three ingredients, recomputed every iteration:
+
+    1. **Dedicated boundary bins.** The single leading (front-most) and trailing
+       (rear-most) frames each get their *own* narrow bin. A bin holding one frame has
+       the maximum possible density weight ``1/n_b``, so the frontier is always eligible
+       for respawning and can never be diluted into a populated neighbour.
+    2. **Dedicated bottleneck bins.** Bottlenecks are detected with the MAB objective
+       ``Z_i = log(n_i) - log(sum of n_j ahead of i)``: a slice that still holds
+       population while almost nothing lies beyond it is the uphill face of a barrier.
+       ``n_bottleneck`` such slices (per direction) get their own narrow bins, which
+       concentrates respawning exactly where flux is being lost.
+    3. **Evenly spaced bins in between**, spanning only the *occupied* range rather than
+       the full configured domain, so resolution follows the walkers.
+
+    Note that fine bins at the frontier are necessary but not sufficient: with hard
+    density spawning the frontier bin is only one of ``walker`` selected bins, so only
+    ~1/``walker`` of the effort attacks the barrier. Pair this binner with the WE spawner
+    (``spawn_scheme: we``, which *replicates* ``we_target_per_bin`` walkers into each
+    occupied bin) to obtain a genuine ratchet.
+    """
+
+    def __init__(self, *args, n_bottleneck: int = 1, n_fine: int = 60, **kw):
+        super().__init__(*args, **kw)
+        self.n_bottleneck = int(n_bottleneck)
+        self.n_fine = int(n_fine)
+
+    def _bottlenecks(self, col, lo, hi):
+        """Positions of the MAB bottleneck slices along one axis."""
+        hist, edges = np.histogram(col, bins=self.n_fine, range=(lo, hi))
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        occupied = hist > 0
+        if occupied.sum() < 3:
+            return []
+
+        out = []
+        for direction in (+1, -1):
+            h = hist if direction > 0 else hist[::-1]
+            c = centers if direction > 0 else centers[::-1]
+            # cumulative population strictly AHEAD of slice i, in this direction
+            ahead = np.cumsum(h[::-1])[::-1] - h
+            with np.errstate(divide="ignore", invalid="ignore"):
+                z = np.log(np.where(h > 0, h, np.nan)) - np.log(np.where(ahead > 0, ahead, np.nan))
+            z = np.where(np.isfinite(z), z, -np.inf)
+            # ignore the extreme front slice itself (it has nothing ahead by construction)
+            valid = np.where(h > 0)[0]
+            if len(valid) < 3:
+                continue
+            valid = valid[:-1]
+            if len(valid) == 0:
+                continue
+            best = valid[np.argsort(z[valid])[-self.n_bottleneck:]]
+            out.extend(float(c[i]) for i in best)
+        return out
+
+    def _axis_edges(self, col, lo, hi, nb):
+        occ_lo, occ_hi = float(col.min()), float(col.max())
+        if nb < 6 or occ_hi <= occ_lo:
+            return np.linspace(lo, hi, nb + 1)
+
+        span = occ_hi - occ_lo
+        eps = max(span * 0.02, (hi - lo) * 1e-4)   # width of a dedicated bin
+
+        specials = [occ_lo, occ_hi]                      # leading + trailing frames
+        specials += self._bottlenecks(col, lo, hi)       # uphill faces of barriers
+
+        # narrow bracket around each special position
+        cuts = [lo, hi]
+        for s in specials:
+            cuts += [s - eps, s + eps]
+
+        # evenly spaced bins filling the remaining budget across the occupied range
+        n_even = max(nb - 2 * len(specials), 2)
+        cuts += list(np.linspace(occ_lo, occ_hi, n_even + 1))
+
+        edges = np.unique(np.clip(np.asarray(cuts, dtype=float), lo, hi))
+        return edges
 
 
 class EigenvectorBinner(AdaptiveBinner):
@@ -239,6 +323,7 @@ def make_binner(
     target=None,
     n_fine: int = 100,
     smoothing: int = 3,
+    n_bottleneck: int = 1,
 ):
     """Construct the configured binner. ``uniform`` → ``RegularBinner`` (exact)."""
     if scheme == "uniform":
@@ -254,4 +339,6 @@ def make_binner(
     )
     if scheme == "gradient":
         kwargs.update(n_fine=n_fine, smoothing=smoothing)
+    if scheme == "mab":
+        kwargs.update(n_fine=n_fine, n_bottleneck=n_bottleneck)
     return BinnerFactory._binners[scheme](**kwargs)

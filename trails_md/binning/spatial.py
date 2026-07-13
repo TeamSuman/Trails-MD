@@ -29,6 +29,32 @@ def padded_bounds(points: np.ndarray, padding: float = 0.1) -> tuple[np.ndarray,
     return mins - pad, maxs + pad
 
 
+
+def bucket_frames(cell_idx: np.ndarray, nbin) -> tuple[np.ndarray, list]:
+    """Group frame indices by grid cell, vectorized.
+
+    ``cell_idx`` is an ``(n_frames, n_axes)`` integer array of per-axis bin indices.
+    Returns ``(populations, populated_data)`` in row-major (``np.ndindex``) order.
+
+    The obvious implementation is a Python loop over frames, which is O(n_frames)
+    interpreted work re-run on the *whole cumulative history* every iteration --
+    the dominant analysis cost in long campaigns. Sorting the flat cell index
+    instead makes the per-frame work numpy-level and leaves only a loop over
+    (few) bins.
+    """
+    nbin = [int(b) for b in nbin]
+    n_cells = int(np.prod(nbin))
+    if len(cell_idx) == 0:
+        return np.zeros(n_cells, dtype=int), [[] for _ in range(n_cells)]
+
+    flat = np.ravel_multi_index(tuple(cell_idx.T), tuple(nbin))
+    populations = np.bincount(flat, minlength=n_cells)
+
+    order = np.argsort(flat, kind="stable")
+    bounds = np.searchsorted(flat[order], np.arange(n_cells + 1))
+    populated_data = [order[bounds[i]:bounds[i + 1]] for i in range(n_cells)]
+    return populations, populated_data
+
 class RegularBinner:
     """Uniform grid binning for projected CV points."""
 
@@ -77,14 +103,9 @@ class RegularBinner:
             dtype=float,
         )
         id_to_row = {bin_id: i for i, bin_id in enumerate(ids)}
-        populations = np.zeros(len(ids), dtype=int)
-        populated_data: list[list[int]] = [[] for _ in ids]
 
         bin_ids = self.find_bins(points)
-        for frame_index, bin_id in enumerate(bin_ids):
-            row = id_to_row[tuple(bin_id.tolist())]
-            populations[row] += 1
-            populated_data[row].append(frame_index)
+        populations, populated_data = bucket_frames(bin_ids, self.n_bins.tolist())
 
         target_closeness = None
         if self.target is not None:
