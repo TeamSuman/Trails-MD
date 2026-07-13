@@ -451,10 +451,24 @@ class TrailsMDCore:
                 if missing
                 else ""
             )
+            hint = ""
+            if failed == n_walkers and self.iteration == 0:
+                # Every walker died on the very first iteration. Overwhelmingly the
+                # cause is an unrelaxed starting structure (steric clashes -> NaN),
+                # not a broken engine or GPU. Say so, instead of leaving the user with
+                # N identical OpenMM NaN tracebacks to interpret.
+                hint = (
+                    "\nHINT: all walkers failed on iteration 0. The most common cause is a "
+                    "starting structure that has not been energy-minimized/equilibrated "
+                    "(steric clashes integrate to NaN on the first steps). Minimize and "
+                    "equilibrate the structure before the campaign, set 'engine.equilibrate: "
+                    "true', or reduce 'engine.dt'. A NaN here is almost never a force-field "
+                    "or GPU fault."
+                )
             raise RuntimeError(
                 f"{failed}/{n_walkers} walker(s) failed during iteration "
                 f"{self.iteration} (min_success_fraction={min_fraction}); "
-                "stopping before CV extraction." + detail
+                "stopping before CV extraction." + detail + hint
             )
         other_start_time = time.time()
         if len(self.walker_parents) != len(walkers):
@@ -1293,6 +1307,8 @@ class TrailsMDCore:
             )
             return
 
+        lag_ok = self._msm_lag_is_assessable(trajs, msm_cfg.lagtime)
+
         try:
             result = self.msm_estimator.fit(trajs, iteration=current_iteration)
         except Exception as exc:  # noqa: BLE001 - MSM is diagnostic, never fatal
@@ -1307,9 +1323,55 @@ class TrailsMDCore:
 
         converged = self.msm_monitor.update(result)
         logging.info("MSM convergence %s", self.msm_monitor.status_line())
+        if converged and not lag_ok:
+            # The criteria are satisfied, but the implied-timescale plateau cannot be
+            # assessed within the available segment length -- do NOT certify (see
+            # _msm_lag_is_assessable). Convergence across iterations is not the same
+            # thing as convergence in lag time.
+            logging.warning(
+                "MSM criteria satisfied at iteration %d but convergence is NOT certified: "
+                "lagtime is too large a fraction of the walker segment length.",
+                current_iteration,
+            )
+            return
         if converged and not self.converged:
             self.converged = True
             self.convergence_reason = self.msm_monitor.reason
+
+    def _msm_lag_is_assessable(self, trajs: list[Any], lagtime: int) -> bool:
+        """Can an implied-timescale plateau actually be resolved with these segments?
+
+        Walkers spawn with velocities redrawn from a Maxwell-Boltzmann distribution, which
+        severs phase-space continuity at every parent-child boundary. Each walker segment is
+        therefore an independent trajectory and the MSM lag time is hard-capped by the segment
+        length ``L``: a transition cannot be counted at a lag longer than the trajectory that
+        carries it.
+
+        Markovianity additionally requires ``lagtime`` to exceed the momentum relaxation time,
+        so the usable window is ``1/gamma << lagtime <= L``. If ``lagtime`` approaches ``L``
+        there are too few lagged pairs per segment to see whether the implied timescales have
+        plateaued -- and the failure is silent: the convergence monitor watches the ITS across
+        *iterations*, so as data accumulate the estimate stops moving and looks converged even
+        when it is systematically underestimated.
+
+        We therefore require ``lagtime <= L/5`` before allowing the monitor to certify
+        convergence. Campaigns that need a longer lag should lengthen ``spawning.step`` (longer
+        walkers) so that ``L`` grows.
+        """
+        if not trajs:
+            return False
+        shortest = min(len(t) for t in trajs)
+        if lagtime * 5 <= shortest:
+            return True
+        logging.warning(
+            "MSM lagtime=%d is more than 1/5 of the shortest walker segment (%d frames). "
+            "The implied-timescale plateau cannot be assessed within a single segment, so "
+            "slow timescales may be systematically underestimated. Increase spawning.step "
+            "(longer walkers) or reduce msm.lagtime.",
+            lagtime,
+            shortest,
+        )
+        return False
 
     def _save_msm_result(self, iteration: int, result: Any) -> None:
         try:

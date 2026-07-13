@@ -71,6 +71,7 @@ test = [
 ]
 docs = [
   "mkdocs-material>=9.0",
+  "mkdocstrings[python]>=0.24",   # renders the API reference from docstrings
 ]
 all = [
   "trails-md[openmm,deep-tica,examples,test,docs]",

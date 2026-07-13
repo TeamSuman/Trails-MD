@@ -85,7 +85,8 @@ class OpenMMEngine(MDEngine):
                 self.top = self.gro
         elif file_extension == ".xml":
             self.gro = XmlSerializer.deserialize(open(gro_file).read())
-        elif file_extension == ".crd":
+        elif file_extension in {".crd", ".rst7", ".ncrst", ".inpcrd"}:
+            # tleap's `saveamberparm` writes .rst7 by default; accept the whole family.
             self.gro = AmberInpcrdFile(gro_file)
             self.top = AmberPrmtopFile(top_file, periodicBoxVectors=self.gro.boxVectors)
         else:
