@@ -94,7 +94,15 @@ class WESpawner(Spawner):
         ends = np.minimum(np.arange(1, n_live + 1) * fpw - 1, len(points) - 1)
 
         weights = self._live_weights(n_live)
-        labels = self._bin_labels(cumulative)[offset + ends]
+        # Bin the LIVE ENSEMBLE, not the cumulative cloud. This is not a detail: an
+        # adaptive binner (MAB) gives the leading frame its own dedicated bin, and if
+        # the binner is fitted to the cumulative cloud that leading frame is usually a
+        # *historical* one that no live walker occupies. A bin with no live walker in
+        # it gets no slots, so nothing is ever replicated into the frontier and the
+        # ratchet never engages -- the run then behaves exactly like the unweighted
+        # control. Binning the live walkers is also what MAB/WESTPA actually do: bins
+        # are re-laid over the current ensemble every iteration.
+        labels = self._bin_labels(cumulative[offset + ends])
 
         parents, new_weights = self._resample_to_budget(
             weights, labels, top_n, self.rng

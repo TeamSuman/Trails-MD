@@ -110,3 +110,35 @@ def test_weights_are_still_conserved_after_resampling():
     spawner.sample(points, top_n=len(LIVE))
     assert spawner.weights is not None
     assert spawner.weights.sum() == pytest.approx(1.0)
+
+
+def test_adaptive_binner_is_fitted_to_the_live_ensemble_not_the_history():
+    """MAB's leading bin must track the leading LIVE walker.
+
+    If the binner is fitted to the cumulative cloud, MAB's dedicated leading bin
+    lands on a *historical* frame that no live walker occupies. A bin with no live
+    walker gets no slots, so nothing is ever replicated into the frontier and WE
+    quietly degrades into the unweighted control -- which is exactly what the first
+    fixed proline run did (frontier flat, indistinguishable from density spawning).
+    """
+    from trails_md.binning.adaptive import make_binner
+
+    rng = np.random.default_rng(0)
+    # 47 walkers deep in the basin, one lone walker far out at the frontier
+    progress = np.concatenate([rng.uniform(0.0, 12.0, 47), [50.0]])
+    points = _ensemble(progress)
+
+    spawner = WESpawner(
+        n_bins=[12, 1], min_values=[0.0, -180.0], max_values=[180.0, 180.0],
+        target_per_bin=4, seed=0,
+    )
+    spawner.binner = make_binner(
+        "mab", n_bins=[12, 1], min_values=[0.0, -180.0], max_values=[180.0, 180.0]
+    )
+    chosen = spawner.sample(points, top_n=48)
+    replicas = (points[np.asarray(chosen), 0] > 45.0).sum()
+
+    # Fitted to history this was 0. Fitted to the live ensemble the lone frontier
+    # walker earns a whole bin's share of the budget.
+    assert replicas >= 4
+    assert spawner.weights.sum() == pytest.approx(1.0)
