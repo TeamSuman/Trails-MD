@@ -23,69 +23,71 @@ import pytest
 from trails_md.binning.we import WeightedEnsemble
 from trails_md.spawners.we import WESpawner
 
-# Frames per 10-degree slice up the real proline barrier (explicit TIP3P).
-PROLINE_POPULATIONS = [176124, 67107, 10353, 775, 40, 1]
+FPW = 10  # frames per walker (step // stride)
 
 
-def _proline_cloud() -> np.ndarray:
-    """A 2-D cloud whose first axis is progress up the barrier (0..50 deg)."""
-    progress = np.concatenate(
-        [np.full(pop, 10.0 * i) for i, pop in enumerate(PROLINE_POPULATIONS)]
-    )
-    return np.column_stack([progress, np.zeros_like(progress)])
+def _ensemble(progress: np.ndarray) -> np.ndarray:
+    """Live ensemble: frames laid out contiguously per walker, one block each."""
+    flat = np.repeat(progress, FPW)
+    return np.column_stack([flat, np.zeros_like(flat)])
 
 
-def _spawner(seed: int = 0) -> WESpawner:
+def _spawner(n_bins: int = 6, target: int = 4, seed: int = 0) -> WESpawner:
     return WESpawner(
-        n_bins=[len(PROLINE_POPULATIONS), 1],
+        n_bins=[n_bins, 1],
         min_values=[-5.0, -1.0],
-        max_values=[10.0 * len(PROLINE_POPULATIONS) - 5.0, 1.0],
-        target_per_bin=4,
+        max_values=[105.0, 1.0],
+        target_per_bin=target,
         seed=seed,
     )
 
 
+# One lone walker on the barrier top; the rest deep in the trans basin -- the
+# shape of the real proline ensemble, where the frontier bin held weight 4e-6.
+FRONTIER = 95.0
+LIVE = np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 20.0, 40.0, 60.0, FRONTIER])
+
+
 def test_frontier_is_spawned_every_iteration():
     """The sparsest bin -- the barrier frontier -- must always get walkers."""
-    points = _proline_cloud()
-    frontier = 10.0 * (len(PROLINE_POPULATIONS) - 1)
+    points = _ensemble(LIVE)
     spawner = _spawner()
 
-    attacked = 0
     trials = 25
+    attacked = 0
     for _ in range(trials):
-        chosen = spawner.sample(points, top_n=16)
-        if (points[np.asarray(chosen), 0] >= frontier).any():
+        chosen = spawner.sample(points, top_n=len(LIVE))
+        if (points[np.asarray(chosen), 0] >= FRONTIER).any():
             attacked += 1
 
-    # Weight-proportional selection scored ~0.0001 here. Bin-balanced scores 1.0.
+    # Weight-proportional selection scored ~1e-4 here. Bin-balanced scores 1.0.
     assert attacked == trials
 
 
 def test_budget_is_spread_across_bins_not_concentrated_in_the_basin():
     """No single bin may swallow the walker budget, however heavy it is."""
-    points = _proline_cloud()
-    chosen = _spawner().sample(points, top_n=16)
-    progress = points[np.asarray(chosen), 0]
+    points = _ensemble(LIVE)
+    spawner = _spawner()
+    chosen = spawner.sample(points, top_n=len(LIVE))
 
-    # 6 occupied bins, 16 slots -> every bin served, none monopolising.
-    assert len(np.unique(progress)) == len(PROLINE_POPULATIONS)
-    _, counts = np.unique(progress, return_counts=True)
-    assert counts.max() <= 4
+    assert len(chosen) == len(LIVE)
+    # The crowded trans basin must not take every slot.
+    picked = points[np.asarray(chosen), 0]
+    assert (picked > 50).sum() >= 2
 
 
 def test_scarce_slots_go_to_the_sparsest_bins():
-    """With fewer slots than bins, the frontier still wins a slot."""
-    points = _proline_cloud()
+    """With fewer slots than occupied bins, the frontier still wins one."""
+    points = _ensemble(LIVE)
     chosen = _spawner().sample(points, top_n=2)
-    progress = sorted(points[np.asarray(chosen), 0])
-    # The two sparsest bins are the two highest-progress ones.
-    assert progress == [40.0, 50.0]
+    picked = sorted(points[np.asarray(chosen), 0])
+    assert len(picked) == 2
+    assert picked[-1] == FRONTIER  # the sparsest bin is served first
 
 
 def test_merge_conserves_weight_and_is_not_quadratic():
     """A real equilibrium bin (176k frames) must merge in reasonable time."""
-    n = len(PROLINE_POPULATIONS[0:1]) and PROLINE_POPULATIONS[0]
+    n = 176_124
     weights = np.full(n, 1.0 / n)
     labels = np.zeros(n, dtype=int)
 
@@ -103,8 +105,8 @@ def test_merge_conserves_weight_and_is_not_quadratic():
 
 def test_weights_are_still_conserved_after_resampling():
     """Selection changed; the WE weight bookkeeping must not have."""
-    points = _proline_cloud()
+    points = _ensemble(LIVE)
     spawner = _spawner()
-    spawner.sample(points, top_n=16)
+    spawner.sample(points, top_n=len(LIVE))
     assert spawner.weights is not None
     assert spawner.weights.sum() == pytest.approx(1.0)

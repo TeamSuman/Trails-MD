@@ -1,14 +1,23 @@
-"""Weighted-ensemble spawner.
+"""Weighted-ensemble spawner (Huber & Kim, 1996).
 
-Carries statistical weights on the cumulative point cloud and uses
-:class:`~trails_md.binning.we.WeightedEnsemble` split/merge resampling to pick
-the next walkers, conserving total weight. A faithful alternative to MSM
-least-counts / density spawning when unbiased weights are wanted.
+Resamples the *live* walker ensemble by split/merge, keeping ``we_target_per_bin``
+walkers in every occupied bin while **conserving total statistical weight**. Unlike
+the exploration-oriented spawners (density / FPS / LOF / MSM least-counts), the
+weights it carries are rigorous: a walker split ``c`` ways yields ``c`` children of
+weight ``w/c``, merges sum weight, and ``sum(weights) == 1`` every iteration. That
+is what makes an unbiased rate (MFPT) recoverable from a WE run, and it is the whole
+reason to prefer ``spawn_scheme: we`` over the cheaper exploration schemes.
 
 Implements the standard ``sample(points, top_n, history)`` contract, returning
-indices into the cumulative point cloud (repeats indicate split walkers), so it
-is a drop-in ``spawn_scheme: we`` option. Per-frame weights are carried across
-iterations in the spawner instance (and exposed via ``state_dict``).
+indices into the cumulative point cloud (repeats indicate split walkers), so it is a
+drop-in ``spawn_scheme: we`` option. Walker weights are carried across iterations in
+the spawner instance (and exposed via ``state_dict``).
+
+Two invariants are easy to get backwards and both are load-bearing; see ``sample``
+and ``_resample_to_budget`` for why:
+
+* CPU is allocated **across bins**, never in proportion to weight.
+* The ensemble is the **live walkers**, never an arbitrary frame from history.
 """
 
 from __future__ import annotations
@@ -38,48 +47,130 @@ class WESpawner(Spawner):
         self.n_bins = n_bins or [30, 30]
         self.min_values = min_values
         self.max_values = max_values
+        self.target_per_bin = int(target_per_bin)
         self.we = WeightedEnsemble(target_per_bin=target_per_bin)
-        self.weights: np.ndarray | None = None  # aligned to cumulative cloud
+        # Statistical weight of each walker spawned last iteration (sums to 1).
+        # These are WALKER weights, carried down the lineage -- not per-frame
+        # weights over the cumulative cloud (see `sample`).
+        self.weights: np.ndarray | None = None
         # Optional landscape-adaptive binner (set by the orchestrator); None -> grid.
         self.binner = None
 
     def sample(
         self, points: np.ndarray, top_n: int, history: dict[int, Any] | None = None
     ) -> list[int]:
+        """One Huber-Kim weighted-ensemble resampling step.
+
+        Two things make this rigorous WE rather than "adaptive sampling that also
+        tracks some numbers":
+
+        **The ensemble is the current walkers, not the whole history.** WE is a
+        Markov resampling of the *live* ensemble: each walker runs for tau, and the
+        endpoints are then split/merged. Restarting from an arbitrary frame drawn
+        out of the cumulative cloud has no well-defined statistical weight -- the
+        frame's weight was already spent in the iteration that produced it -- and
+        reusing it silently double-counts probability. A rate computed from such
+        weights is *wrong*, which is worse than having no rate. So the ensemble
+        here is exactly the endpoint of each current walker.
+
+        **The walker budget is the resampling target.** Slots are allocated across
+        occupied bins first (equal share; ties to the sparsest bin, which is the
+        frontier), and each bin is then split/merged to *exactly* its slot count.
+        Every resampled walker is therefore actually run, so total weight is
+        conserved: sum(w) == 1 every iteration, and a child of a walker split c ways
+        carries w/c. That is what makes an unbiased MFPT recoverable downstream.
+        """
         points = np.asarray(points, dtype=float)
         if len(points) == 0:
             raise ValueError("Cannot run WE on an empty point cloud.")
         cumulative = _cumulative_points(points, history)
-        n = len(cumulative)
+        offset = len(cumulative) - len(points)  # current frames start here
 
-        # Initialise / extend per-frame weights; new frames enter with the mean
-        # weight so they neither dominate nor vanish, then renormalise to 1.
-        weights = self._extend_weights(n)
+        # Endpoint frame of each live walker. Frames are laid out contiguously per
+        # walker (frames_per_walker = step // stride), so the last frame of block i
+        # is walker i's endpoint -- the state WE is entitled to continue from.
+        n_live = max(1, min(top_n, len(points)))
+        fpw = max(1, len(points) // n_live)
+        ends = np.minimum(np.arange(1, n_live + 1) * fpw - 1, len(points) - 1)
 
-        labels = self._bin_labels(cumulative)
-        result = self.we.resample(weights, labels, rng=self.rng)
+        weights = self._live_weights(n_live)
+        labels = self._bin_labels(cumulative)[offset + ends]
 
-        # Carry weights forward: aggregate resampled weight onto parent frames.
-        new_weights = np.zeros(n, dtype=float)
-        for parent, w in zip(result.parents, result.weights, strict=False):
-            new_weights[parent] += w
-        total = new_weights.sum()
-        self.weights = new_weights / total if total > 0 else None
+        parents, new_weights = self._resample_to_budget(
+            weights, labels, top_n, self.rng
+        )
+        self.weights = np.asarray(new_weights, dtype=float)
+        return [int(offset + ends[p]) for p in parents]
 
-        return self._draw(result, labels, top_n, self.rng)
+    def _live_weights(self, n_live: int) -> np.ndarray:
+        """Weights of the live walkers, inherited from the previous resampling."""
+        if self.weights is None or len(self.weights) != n_live:
+            # First iteration (or a walker-count change): start from uniform.
+            return np.full(n_live, 1.0 / n_live, dtype=float)
+        w = np.asarray(self.weights, dtype=float)
+        total = w.sum()
+        return w / total if total > 0 else np.full(n_live, 1.0 / n_live)
 
-    def _extend_weights(self, n: int) -> np.ndarray:
-        if self.weights is None or len(self.weights) == 0:
-            weights = np.full(n, 1.0 / n, dtype=float)
-        elif len(self.weights) < n:
-            fill = float(np.mean(self.weights)) if len(self.weights) else 1.0
-            weights = np.concatenate(
-                [self.weights, np.full(n - len(self.weights), fill)]
+    def _resample_to_budget(
+        self,
+        weights: np.ndarray,
+        labels: np.ndarray,
+        top_n: int,
+        rng: np.random.Generator,
+    ) -> tuple[list[int], list[float]]:
+        """Split/merge each bin to exactly its allocated share of the budget.
+
+        Allocation is bin-balanced and NEVER weight-proportional: a walker on a
+        barrier top carries an exponentially small weight by construction, and that
+        smallness is the result being computed, not a reason to stop simulating it.
+        (Selecting with p ~ weight is what reduced this spawner to unbiased MD: on
+        the proline barrier the frontier bin held weight 4e-6 and was picked once
+        per ~15,900 iterations.) Weight decides nothing here except bookkeeping.
+        """
+        bins, inverse = np.unique(labels, return_inverse=True)
+        n_occ = len(bins)
+
+        # Population of each occupied bin among the live walkers; ascending order
+        # puts the sparsest bin -- the frontier -- first in line for scarce slots.
+        counts = np.bincount(inverse, minlength=n_occ)
+        order = np.argsort(counts, kind="stable")
+
+        # Every occupied bin is guaranteed at least one slot, so no bin -- and no
+        # weight -- is ever dropped. That is not luck: the ensemble is the set of
+        # live walker endpoints, so n_occ <= n_live <= top_n by construction. It is
+        # what lets weight be conserved *exactly* rather than renormalised, and it
+        # is why the rate this produces is trustworthy. Assert it rather than
+        # assume it: silently dropping the densest bin (scarce slots go to the
+        # sparsest) would corrupt every weight and yield a plausible, wrong MFPT.
+        if n_occ > top_n:  # pragma: no cover -- unreachable by construction
+            raise AssertionError(
+                f"WE invariant violated: {n_occ} occupied bins > {top_n} walkers. "
+                "Weights cannot be conserved; refusing to produce a corrupt ensemble."
             )
-        else:
-            weights = np.asarray(self.weights[:n], dtype=float)
-        total = weights.sum()
-        return weights / total if total > 0 else np.full(n, 1.0 / n)
+
+        slots = np.zeros(n_occ, dtype=int)
+        for k in range(top_n):
+            slots[order[k % n_occ]] += 1
+
+        parents_out: list[int] = []
+        weights_out: list[float] = []
+        for b in range(n_occ):
+            target = int(slots[b])
+            if target == 0:
+                continue
+            members = np.flatnonzero(inverse == b).tolist()
+            mweights = [float(weights[i]) for i in members]
+            members, mweights = WeightedEnsemble._merge(members, mweights, target, rng)
+            members, mweights = WeightedEnsemble._split(members, mweights, target)
+            parents_out.extend(int(m) for m in members)
+            weights_out.extend(float(w) for w in mweights)
+
+        # Split/merge conserve weight exactly and every bin was served, so this only
+        # mops up floating-point drift -- it is not a rescue renormalisation.
+        total = float(np.sum(weights_out))
+        if total > 0:
+            weights_out = [w / total for w in weights_out]
+        return parents_out, weights_out
 
     def _bin_labels(self, cumulative: np.ndarray) -> np.ndarray:
         if self.binner is not None:
@@ -96,54 +187,6 @@ class WESpawner(Spawner):
             for frame in frames:
                 labels[frame] = row
         return labels
-
-    @staticmethod
-    def _draw(
-        result, labels: np.ndarray, top_n: int, rng: np.random.Generator
-    ) -> list[int]:
-        """Allocate the walker budget *across bins*, never in proportion to weight.
-
-        This is the heart of weighted ensemble and the easiest thing to get
-        backwards. A walker sitting on top of a barrier carries an
-        exponentially small statistical weight -- that smallness is the
-        *result* being computed, not a reason to stop simulating it. Drawing
-        walkers with ``p = weight`` (as this function used to) hands essentially
-        the entire budget to the equilibrium basin and reduces WE to plain
-        unbiased MD: on the proline barrier the frontier bin held total weight
-        4e-6, so it was picked once per ~15,900 iterations, i.e. never in a
-        250-iteration run.
-
-        Instead every occupied bin is entitled to an equal share of the budget.
-        When there are fewer slots than bins the sparsest bins win the ties --
-        the sparsest bin *is* the frontier -- so the leading edge is always
-        simulated. Weights are still carried (and still conserved) by
-        ``resample``; they are for unbiased estimation, not for CPU allocation.
-        """
-        parents = np.asarray(result.parents, dtype=int)
-        if top_n <= 0 or parents.size == 0:
-            return []
-        parent_bins = labels[parents]
-        bins = np.unique(parent_bins)
-
-        # Bin population over the cumulative cloud: ascending == frontier first.
-        pops = np.bincount(labels[labels >= 0], minlength=int(labels.max()) + 1)
-        order = np.argsort(pops[bins], kind="stable")
-
-        # Round-robin the slots, sparsest bin first. If slots >= bins every bin
-        # is served; if slots < bins the sparsest `top_n` bins are served.
-        slots = np.zeros(len(bins), dtype=int)
-        for k in range(top_n):
-            slots[order[k % len(bins)]] += 1
-
-        chosen: list[int] = []
-        for position, count in enumerate(slots):
-            if count == 0:
-                continue
-            candidates = parents[parent_bins == bins[position]]
-            # Walkers within a bin are interchangeable after split/merge.
-            picks = rng.choice(len(candidates), size=count, replace=len(candidates) < count)
-            chosen.extend(int(candidates[p]) for p in picks)
-        return chosen
 
     def state_dict(self) -> dict:
         state = super().state_dict()
