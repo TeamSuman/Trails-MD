@@ -66,7 +66,7 @@ class WESpawner(Spawner):
         total = new_weights.sum()
         self.weights = new_weights / total if total > 0 else None
 
-        return self._draw(result, top_n, self.rng)
+        return self._draw(result, labels, top_n, self.rng)
 
     def _extend_weights(self, n: int) -> np.ndarray:
         if self.weights is None or len(self.weights) == 0:
@@ -98,14 +98,52 @@ class WESpawner(Spawner):
         return labels
 
     @staticmethod
-    def _draw(result, top_n: int, rng: np.random.Generator) -> list[int]:
+    def _draw(
+        result, labels: np.ndarray, top_n: int, rng: np.random.Generator
+    ) -> list[int]:
+        """Allocate the walker budget *across bins*, never in proportion to weight.
+
+        This is the heart of weighted ensemble and the easiest thing to get
+        backwards. A walker sitting on top of a barrier carries an
+        exponentially small statistical weight -- that smallness is the
+        *result* being computed, not a reason to stop simulating it. Drawing
+        walkers with ``p = weight`` (as this function used to) hands essentially
+        the entire budget to the equilibrium basin and reduces WE to plain
+        unbiased MD: on the proline barrier the frontier bin held total weight
+        4e-6, so it was picked once per ~15,900 iterations, i.e. never in a
+        250-iteration run.
+
+        Instead every occupied bin is entitled to an equal share of the budget.
+        When there are fewer slots than bins the sparsest bins win the ties --
+        the sparsest bin *is* the frontier -- so the leading edge is always
+        simulated. Weights are still carried (and still conserved) by
+        ``resample``; they are for unbiased estimation, not for CPU allocation.
+        """
         parents = np.asarray(result.parents, dtype=int)
-        weights = np.asarray(result.weights, dtype=float)
-        total = weights.sum()
-        probs = weights / total if total > 0 else np.full(len(parents), 1.0 / len(parents))
-        replace = len(parents) < top_n
-        chosen = rng.choice(parents, size=top_n, replace=replace, p=probs)
-        return [int(i) for i in chosen]
+        if top_n <= 0 or parents.size == 0:
+            return []
+        parent_bins = labels[parents]
+        bins = np.unique(parent_bins)
+
+        # Bin population over the cumulative cloud: ascending == frontier first.
+        pops = np.bincount(labels[labels >= 0], minlength=int(labels.max()) + 1)
+        order = np.argsort(pops[bins], kind="stable")
+
+        # Round-robin the slots, sparsest bin first. If slots >= bins every bin
+        # is served; if slots < bins the sparsest `top_n` bins are served.
+        slots = np.zeros(len(bins), dtype=int)
+        for k in range(top_n):
+            slots[order[k % len(bins)]] += 1
+
+        chosen: list[int] = []
+        for position, count in enumerate(slots):
+            if count == 0:
+                continue
+            candidates = parents[parent_bins == bins[position]]
+            # Walkers within a bin are interchangeable after split/merge.
+            picks = rng.choice(len(candidates), size=count, replace=len(candidates) < count)
+            chosen.extend(int(candidates[p]) for p in picks)
+        return chosen
 
     def state_dict(self) -> dict:
         state = super().state_dict()
