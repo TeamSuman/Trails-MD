@@ -37,6 +37,28 @@ class OpenMMEngine(MDEngine):
 
         self.simulation = None
         self.positions = None
+        # When True, a persistent worker has cached this prepared engine and
+        # re-arms it per walker instead of rebuilding the Context (see
+        # ``_create_simulation`` and ``rearm_for_walker``). Off by default so the
+        # normal one-shot path is completely unchanged.
+        self._warm_reuse = False
+
+    # Persistent-worker support: rebuilding the OpenMM Context (+ CUDA JIT) is the
+    # dominant per-walker cost for short segments. This engine can instead keep a
+    # warm Context alive across walkers and re-arm it, reproducing a fresh build
+    # bit-for-bit (verified on the CPU platform). Subprocess engines (GROMACS,
+    # Amber) gain nothing from this and leave the flag False.
+    supports_warm_reuse = True
+
+    def rearm_for_walker(self, seed: int | None) -> None:
+        """Point an already-prepared, cached engine at the next walker.
+
+        Only the per-walker state changes: the thermostat seed. Re-arming leaves
+        the (JIT-warm) Context in place; ``_create_simulation`` then reseeds the
+        integrator and reinitializes the Context so the run is identical to one
+        started from a fresh build with this seed.
+        """
+        self.seed = seed
 
     @staticmethod
     def _available_platforms() -> list[str]:
@@ -137,6 +159,12 @@ class OpenMMEngine(MDEngine):
                 self.top,
                 **accepted_kwargs,
             )
+            # A user's make_system cannot know the per-walker seed, so thread it
+            # here too. Without this the thermostat RNG of a custom-system_file run
+            # is unseeded and walkers are NOT reproducible -- the deterministic-seed
+            # guarantee silently held only for the built-in system path.
+            if self.seed is not None and hasattr(self.integrator, "setRandomNumberSeed"):
+                self.integrator.setRandomNumberSeed(self.seed)
         else:
             self.system = self.top.createSystem(
                 nonbondedMethod=self.nonbondedMethod,
@@ -215,6 +243,18 @@ class OpenMMEngine(MDEngine):
 
     def _create_simulation(self, device_index: int):
         import logging
+
+        # Warm path: a persistent worker has already built this Context on this
+        # device. Re-arm it instead of rebuilding. Reseeding the integrator and
+        # then reinitializing the Context reproduces a fresh build bit-for-bit,
+        # because the thermostat RNG is re-derived from the new seed on
+        # reinitialize (a naive reseed without reinitialize does NOT — verified).
+        if self._warm_reuse and self.simulation is not None:
+            if self.seed is not None and getattr(self, "integrator", None) is not None:
+                self.integrator.setRandomNumberSeed(self.seed)
+            self.simulation.context.reinitialize(preserveState=False)
+            self.simulation.context.setPositions(self.positions)
+            return
 
         platform_props = self._platform_properties(device_index)
         try:

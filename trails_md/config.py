@@ -279,6 +279,13 @@ class ExecutionConfig(BaseModel):
     # longer than this many seconds. None disables the timeout (default). Guards
     # against a hung in-process OpenMM walker stalling the campaign forever.
     walker_timeout: float | None = None
+    # Local backend: keep worker processes (and, for OpenMM, warm Contexts) alive
+    # across iterations instead of rebuilding them every walker. Rebuilding the
+    # Context + CUDA JIT is the dominant per-walker cost for short segments, so
+    # this is a large speed-up for the adaptive regime; results are identical
+    # (the engine reseeds + reinitializes). Only OpenMM benefits; subprocess
+    # engines (GROMACS/Amber) run fresh regardless.
+    persistent_workers: bool = False
     # Scheduler resource requests (per array task = one walker).
     partition: str | None = None  # SLURM partition / PBS queue
     account: str | None = None

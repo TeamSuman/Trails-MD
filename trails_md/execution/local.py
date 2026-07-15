@@ -70,13 +70,21 @@ def _execution_slots(
     return [0 for _ in range(min(max_workers, n_walkers))]
 
 
-def _run_one(task: WalkerTask, device_index: int) -> bool:
+# Per-worker-process cache of prepared, warm-reusable engines. Because each
+# ProcessPoolExecutor worker is a distinct process that imports this module once,
+# this dict is naturally private to a worker and persists across every task that
+# worker handles — which is exactly the lifetime we want for a warm Context.
+_WORKER_ENGINE_CACHE: dict = {}
+
+
+def _run_one(task: WalkerTask, device_index: int, warm: bool = False) -> bool:
     task.device_index = device_index
     # A single walker's failure (CUDA error, NaN blow-up, missing file, …) must
     # not abort the whole iteration — mirror the scheduler path (run_task.py),
     # which reports failures as success=False rather than raising.
     try:
-        return run_walker_task(task)
+        cache = _WORKER_ENGINE_CACHE if warm else None
+        return run_walker_task(task, engine_cache=cache)
     except Exception:  # noqa: BLE001 - report failure, keep the batch alive
         import logging
         import traceback
@@ -98,17 +106,44 @@ def _terminate_workers(executor) -> None:
             pass
 
 
+# A single ProcessPoolExecutor kept alive across iterations for persistent_workers.
+# It is module-level because ``make_backend`` builds a fresh backend object every
+# iteration, so the pool cannot live on the backend instance. Keyed by worker
+# count: if the slot count changes the old pool is retired and a new one built.
+_PERSISTENT_POOL: dict = {"executor": None, "workers": None}
+
+
+def _get_persistent_pool(n_workers: int, ctx):
+    pool = _PERSISTENT_POOL
+    if pool["executor"] is not None and pool["workers"] != n_workers:
+        _retire_persistent_pool()
+    if pool["executor"] is None:
+        pool["executor"] = ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx)
+        pool["workers"] = n_workers
+    return pool["executor"]
+
+
+def _retire_persistent_pool() -> None:
+    executor = _PERSISTENT_POOL["executor"]
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
+    _PERSISTENT_POOL["executor"] = None
+    _PERSISTENT_POOL["workers"] = None
+
+
 class LocalProcessBackend(ExecutionBackend):
     def __init__(
         self,
         gpu_ids: list[int] | None = None,
         max_workers: int = 8,
         walker_timeout: float | None = None,
+        persistent_workers: bool = False,
         **_,
     ):
         self.gpu_ids = gpu_ids
         self.max_workers = max_workers
         self.walker_timeout = walker_timeout
+        self.persistent_workers = persistent_workers
 
     def execute(self, tasks: list[WalkerTask]) -> list[bool]:
         import multiprocessing as mp
@@ -127,17 +162,18 @@ class LocalProcessBackend(ExecutionBackend):
         results = [False] * len(tasks)
         task_iter = iter(enumerate(tasks))
         timeout = self.walker_timeout
+        warm = self.persistent_workers
 
         def submit(executor, device_index: int):
             try:
                 pos, task = next(task_iter)
             except StopIteration:
                 return None
-            future = executor.submit(_run_one, task, device_index)
+            future = executor.submit(_run_one, task, device_index, warm)
             # value = (pos, task.index, device, start_time)
             return future, (pos, task.index, device_index, time.monotonic())
 
-        with ProcessPoolExecutor(max_workers=len(slots), mp_context=ctx) as executor:
+        def schedule(executor) -> None:
             active: dict = {}
             for device_index in slots:
                 submitted = submit(executor, device_index)
@@ -183,9 +219,24 @@ class LocalProcessBackend(ExecutionBackend):
                             timeout,
                         )
                         _terminate_workers(executor)
+                        # A killed persistent pool holds dead workers (and lost warm
+                        # contexts); retire it so the next iteration rebuilds cleanly.
+                        if warm:
+                            _retire_persistent_pool()
                         active.clear()
 
+        if warm:
+            schedule(_get_persistent_pool(len(slots), ctx))
+        else:
+            with ProcessPoolExecutor(max_workers=len(slots), mp_context=ctx) as executor:
+                schedule(executor)
+
         return results
+
+    def close(self) -> None:
+        """Retire the shared persistent pool, if any. Safe to call repeatedly."""
+        if self.persistent_workers:
+            _retire_persistent_pool()
 
 
 ExecutionBackendFactory.register("local", LocalProcessBackend)
