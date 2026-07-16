@@ -34,6 +34,11 @@ class OpenMMEngine(MDEngine):
         self.should_equilibrate = equilibrate
         self.gromacs_include_dir = gromacs_include_dir
         self.seed: int | None = kwargs.get("seed", None)
+        # Kinetics mode: persist each walker's endpoint State (positions+velocities+
+        # box) next to its trajectory so the next segment can CONTINUE the dynamics
+        # (velocity inheritance) rather than redraw velocities. Set via engine_kwargs
+        # by the orchestrator when spawning.inherit_velocities is on.
+        self.save_endstate: bool = bool(kwargs.get("save_endstate", False))
 
         self.simulation = None
         self.positions = None
@@ -378,18 +383,29 @@ class OpenMMEngine(MDEngine):
             os.remove(traj_out_str)
 
         start_positions, start_box_vectors = self._split_start_state(start_coords)
+        start_velocities = (
+            start_coords.get("velocities") if isinstance(start_coords, dict) else None
+        )
         if start_positions is not None:
-            # We assume start_coords is a file containing positions or a state that OpenMM can load
-            # This is a simplification; in reality, we need to extract coords from start_coords.
-            # Assuming start_coords is passed as an object containing positions if it's not a Path
-            # Actually, `start_coords` should be positions directly, or we parse it.
-            # For backward compatibility, let's allow it to be the positions directly.
+            # start_coords may be a bare positions array or a dict carrying
+            # positions/box_vectors/velocities. Positions are always set. For
+            # velocities there are two regimes:
+            #   * exploration (default): redraw from Maxwell-Boltzmann — walkers are
+            #     independent restarts, no continuous dynamics implied.
+            #   * kinetics mode (inherited velocities present): CONTINUE the parent
+            #     walker's dynamics by restoring its endpoint velocities, so weighted
+            #     ensemble is an unbiased resampling of unperturbed trajectories and a
+            #     rate may be read from it. Split children share the parent state and
+            #     decorrelate through the Langevin noise.
             if start_box_vectors is not None:
                 self.simulation.context.setPeriodicBoxVectors(*start_box_vectors)
             self.simulation.context.setPositions(start_positions)
-            self.simulation.context.setVelocitiesToTemperature(
-                self.temperature, self.seed if self.seed is not None else 0
-            )
+            if start_velocities is not None:
+                self.simulation.context.setVelocities(start_velocities)
+            else:
+                self.simulation.context.setVelocitiesToTemperature(
+                    self.temperature, self.seed if self.seed is not None else 0
+                )
 
         self.simulation.reporters = [self._trajectory_reporter(traj_out_str, stride)]
 
@@ -428,7 +444,31 @@ class OpenMMEngine(MDEngine):
             self.simulation.step(steps)
             success = True
 
+        if success and self.save_endstate:
+            self._write_endstate(traj_out_str)
         return success
+
+    def _write_endstate(self, traj_out_str: str) -> None:
+        """Persist the walker's endpoint State for velocity-inheriting respawn.
+
+        Written atomically as ``<traj>.endstate.npz`` (positions nm, velocities
+        nm/ps, box nm). This is what lets weighted-ensemble run as a continuous,
+        unbiased resampling: the child of a split walker restarts from exactly this
+        state and decorrelates through the Langevin noise, so a rate is recoverable.
+        """
+        import numpy as np
+        from openmm import unit
+
+        state = self.simulation.context.getState(getPositions=True, getVelocities=True)
+        pos = state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+        vel = state.getVelocities(asNumpy=True).value_in_unit(
+            unit.nanometer / unit.picosecond
+        )
+        box = state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(unit.nanometer)
+        path = f"{traj_out_str}.endstate.npz"
+        tmp = f"{path}.tmp.npz"
+        np.savez(tmp, positions=pos, velocities=vel, box=box)
+        os.replace(tmp, path)
 
     def _trajectory_reporter(self, traj_out: str, stride: int):
         return XTCReporter(traj_out, stride, enforcePeriodicBox=True)

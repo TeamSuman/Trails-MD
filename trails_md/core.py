@@ -393,6 +393,39 @@ class TrailsMDCore:
             )
         return "xtc"
 
+    def _inherit_walker_states(self, parents: list[int], fallback: list) -> list:
+        """Build velocity-inheriting start states for the next iteration's walkers.
+
+        ``parents[i]`` is the current-iteration walker index that spawned walker
+        ``i`` (from the WE spawner). Each walker wrote its endpoint State beside its
+        trajectory as ``<traj>.endstate.npz``; we load positions/velocities/box from
+        the selected parents so the next segment continues the parent's dynamics.
+        Split children share a parent State and decorrelate through the Langevin
+        noise -- the standard weighted-ensemble split. Any walker whose endstate is
+        missing (e.g. it failed) falls back to its position-only start state, so a
+        single bad walker degrades to a fresh-velocity restart rather than aborting.
+        """
+        import numpy as np
+        from openmm import unit
+
+        iter_dir = self.outdir / f"iter_{self.iteration}"
+        suffix = self._traj_suffix()
+        states: list = []
+        for i, parent in enumerate(parents):
+            endstate = iter_dir / f"iteration_{self.iteration}_{parent}.{suffix}.endstate.npz"
+            if not endstate.exists():
+                states.append(fallback[i])
+                continue
+            data = np.load(endstate)
+            states.append(
+                {
+                    "positions": data["positions"] * unit.nanometer,
+                    "velocities": data["velocities"] * (unit.nanometer / unit.picosecond),
+                    "box_vectors": data["box"] * unit.nanometer,
+                }
+            )
+        return states
+
     def run_iteration(self, walkers: list[Any]):
         """Run a single adaptive sampling iteration."""
 
@@ -406,6 +439,10 @@ class TrailsMDCore:
         }
         if engine_kwargs.get("seed") is None:
             engine_kwargs["seed"] = self.config.random_seed
+        # Kinetics mode: ask the engine to persist each walker's endpoint State so
+        # the next segment can inherit its velocities (continuous WE dynamics).
+        if getattr(self.config.spawning, "inherit_velocities", False):
+            engine_kwargs["save_endstate"] = True
         prepare_kwargs = {
             "conf": Path(self.config.system.conf_file),
             "top": Path(self.config.system.top_file),
@@ -643,6 +680,15 @@ class TrailsMDCore:
         next_walkers = feature_extractor.extract_positions_by_indices(
             sampling_trajectories, spawn_indices
         )
+        # Kinetics mode: replace the position-only start states with full endpoint
+        # States (positions + velocities + box) of the parent walkers, so the next
+        # segment CONTINUES the dynamics instead of redrawing velocities. Only WE
+        # exposes `selected_parents` (current-iteration walker indices), and only
+        # there is velocity inheritance meaningful, so this is a no-op otherwise.
+        if getattr(self.config.spawning, "inherit_velocities", False):
+            parents = getattr(self.spawner, "selected_parents", None)
+            if parents is not None:
+                next_walkers = self._inherit_walker_states(parents, next_walkers)
 
         # Save the current projection and trajectory files after sampling; spawners
         # combine completed history with current points internally.

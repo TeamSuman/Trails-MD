@@ -53,6 +53,9 @@ class WESpawner(Spawner):
         # These are WALKER weights, carried down the lineage -- not per-frame
         # weights over the cumulative cloud (see `sample`).
         self.weights: np.ndarray | None = None
+        # Current-iteration walker indices each spawned walker continues from (set
+        # per sample(); used by the orchestrator for velocity inheritance).
+        self.selected_parents: list[int] | None = None
         # Optional landscape-adaptive binner (set by the orchestrator); None -> grid.
         self.binner = None
 
@@ -108,6 +111,12 @@ class WESpawner(Spawner):
             weights, labels, top_n, self.rng
         )
         self.weights = np.asarray(new_weights, dtype=float)
+        # For kinetics mode: `parents` are indices into the live-walker endpoints,
+        # i.e. the *current-iteration walker index* each spawned walker continues
+        # from (with repeats for splits). The orchestrator uses these to inherit
+        # each parent's endpoint velocities. Exposed as an attribute rather than
+        # returned, to keep the sample() contract (a list of frame indices) intact.
+        self.selected_parents = [int(p) for p in parents]
         return [int(offset + ends[p]) for p in parents]
 
     def _live_weights(self, n_live: int) -> np.ndarray:

@@ -85,6 +85,14 @@ class SpawningConfig(BaseModel):
     voronoi_grid_size: int = 250
     lof_neighbors: int = 20
     we_target_per_bin: int = 4  # weighted-ensemble walkers per occupied bin
+    # Kinetics mode. When True, respawned walkers CONTINUE from their parent's
+    # endpoint velocities instead of redrawing Maxwell-Boltzmann. This turns
+    # weighted ensemble into an unbiased resampling of unperturbed dynamics, so a
+    # rate (MFPT) can be read from the run. Requires spawn_scheme: we (only there
+    # is the ensemble a set of continuable live walkers) and the OpenMM engine.
+    # Default False = exploration mode (independent restarts; fast discovery, no
+    # rate). See the "exploration vs kinetics" section of the docs.
+    inherit_velocities: bool = False
     resolution_check_patience: int = 5
     resolution_max_bins: int = 150
     voronoi_max_clusters: int = 5000
@@ -429,6 +437,25 @@ class TrailsMDConfig(BaseModel):
         if value not in {"fixed", "vamp_adaptive"}:
             raise ValueError("retrain_policy must be 'fixed' or 'vamp_adaptive'")
         return value
+
+    @model_validator(mode="after")
+    def _kinetics_mode_requirements(self):
+        """Velocity inheritance (kinetics mode) is only meaningful, and only
+        implemented, for weighted-ensemble spawning on the OpenMM engine."""
+        if self.spawning.inherit_velocities:
+            if self.spawning.spawn_scheme != "we":
+                raise ValueError(
+                    "spawning.inherit_velocities (kinetics mode) requires "
+                    "spawn_scheme: we -- only weighted ensemble resamples a set of "
+                    "continuable live walkers. Use exploration mode (any spawner, "
+                    "fresh velocities) or switch spawn_scheme to 'we'."
+                )
+            if self.engine.md_engine != "openmm":
+                raise ValueError(
+                    "spawning.inherit_velocities (kinetics mode) is currently "
+                    "implemented only for the OpenMM engine."
+                )
+        return self
 
     @field_validator("checkpoint_freq")
     @classmethod
