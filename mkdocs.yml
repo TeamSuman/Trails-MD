@@ -26,6 +26,7 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - Concepts: concepts.md
+  - Exploration vs. kinetics: modes.md
   - The input file: input_file.md
   - Configuration reference: configuration.md
   - Sampling spaces:
