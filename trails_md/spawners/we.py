@@ -34,6 +34,16 @@ from .density import _cumulative_points
 
 
 class WESpawner(Spawner):
+    # Weighted ensemble resamples ONLY the live walker endpoints -- it never spawns
+    # from a historical frame (doing so would have no well-defined weight; see
+    # `sample`). So the orchestrator must not pool the whole trajectory history for
+    # it: that pooling costs one file-open per past iteration on every spawn step,
+    # which grew the per-iteration overhead by ~0.8 s per iteration on a real run
+    # (7.9 s at iteration 5 -> 11.1 s at iteration 9, unbounded) and made converged
+    # kinetics runs impossible. Exploration spawners (density/FPS/LOF) DO pick
+    # historical frames and leave this True.
+    uses_history = False
+
     def __init__(
         self,
         n_bins: list[int] | None = None,
@@ -62,6 +72,12 @@ class WESpawner(Spawner):
             np.asarray(recycle_target, dtype=float) if recycle_target else None
         )
         self.recycle_basis_index = int(recycle_basis_index)
+        # CV of the basis (source) state, captured on the FIRST sample() call and then
+        # held fixed. It must be cached: without history pooling the point cloud holds
+        # only the current iteration, so `cloud[recycle_basis_index]` would silently
+        # become "wherever walker 0 happens to be now" and the recycling target would
+        # drift every iteration. On the first call it IS the equilibrated start.
+        self.basis_cv: np.ndarray | None = None
         # Recycled weight per iteration; the flux time series the MFPT is read from
         # (after discarding the pre-steady-state transient).
         self.flux_history: list[float] = []
@@ -164,10 +180,17 @@ class WESpawner(Spawner):
         if self.recycle_target is None:
             return np.zeros(n, dtype=bool)
 
+        if self.basis_cv is None:
+            # First call: the cloud still holds the run's starting structure, so this
+            # is the source state. Freeze it -- see the note on `basis_cv`.
+            self.basis_cv = np.asarray(
+                cumulative[self.recycle_basis_index], dtype=float
+            ).copy()
+
         recycled = self._in_region(end_cvs, self.recycle_target)
         self.flux_history.append(float(weights[recycled].sum()))
         if recycled.any():
-            end_cvs[recycled] = cumulative[self.recycle_basis_index]
+            end_cvs[recycled] = self.basis_cv
         return recycled
 
     @staticmethod
@@ -310,6 +333,9 @@ class WESpawner(Spawner):
         # The flux series IS the rate measurement -- checkpoint it, or a resumed run
         # silently loses the observable the whole kinetics mode exists to produce.
         state["flux_history"] = list(self.flux_history)
+        # The frozen basis must survive too: a resume would otherwise re-freeze it to
+        # wherever the ensemble happens to be, silently moving the source state.
+        state["basis_cv"] = None if self.basis_cv is None else self.basis_cv.tolist()
         return state
 
     def load_state_dict(self, state: dict) -> None:
@@ -318,6 +344,8 @@ class WESpawner(Spawner):
             self.weights = np.asarray(state["weights"], dtype=float)
         if state and state.get("flux_history") is not None:
             self.flux_history = list(state["flux_history"])
+        if state and state.get("basis_cv") is not None:
+            self.basis_cv = np.asarray(state["basis_cv"], dtype=float)
 
     def mfpt(self, tau_ps: float, discard_fraction: float = 0.5) -> float | None:
         """Steady-state MFPT (ns) from the recycled-flux series, via the Hill relation.

@@ -665,22 +665,37 @@ class TrailsMDCore:
             self.spawner.cluster_model = getattr(
                 self.msm_estimator, "_cluster_model", None
             )
+        # Spawners that only ever pick from the CURRENT walkers (weighted ensemble --
+        # a historical frame has no well-defined weight) must not be handed the
+        # history, and must not have it pooled for index mapping either: pooling costs
+        # one file-open per past iteration on every spawn step, so the per-iteration
+        # overhead grows without bound (measured: +0.8 s per iteration, 7.9 s at
+        # iteration 5 -> 11.1 s at iteration 9), which makes long kinetics runs
+        # impossible. Exploration spawners DO reach into history and keep the pooling.
+        uses_history = getattr(self.spawner, "uses_history", True)
         spawn_indices = self.spawner.sample(
-            points, self.config.spawning.walker, history=self.history
+            points,
+            self.config.spawning.walker,
+            history=self.history if uses_history else {},
         )
         # The spawner pooled historical frames matching the current projection
         # dimension; build the trajectory and frame-record lists over the *same*
         # iterations so each spawn index maps to the frame it was scored on.
         target_dim = projection_dim(points)
-        sampling_trajectories = self._sampling_trajectories(
-            trajectories, target_dim=target_dim
-        )
+        if uses_history:
+            sampling_trajectories = self._sampling_trajectories(
+                trajectories, target_dim=target_dim
+            )
+            sampling_frame_records = self._sampling_frame_records(
+                current_frame_records, target_dim=target_dim
+            )
+        else:
+            # Indices are already local to this iteration's frames.
+            sampling_trajectories = list(trajectories)
+            sampling_frame_records = current_frame_records
         self._validate_sampling_trajectories(
             sampling_trajectories,
             context=f"spawning iteration {self.iteration}",
-        )
-        sampling_frame_records = self._sampling_frame_records(
-            current_frame_records, target_dim=target_dim
         )
         next_walker_parents = [
             map_global_frame(sampling_frame_records, index)["key"]
