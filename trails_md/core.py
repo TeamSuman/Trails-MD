@@ -83,6 +83,8 @@ class TrailsMDCore:
             grid_size=self.config.spawning.voronoi_grid_size,
             n_neighbors=self.config.spawning.lof_neighbors,
             target_per_bin=self.config.spawning.we_target_per_bin,
+            recycle_target=self.config.spawning.recycle_target,
+            recycle_basis_index=self.config.spawning.recycle_basis_index,
             alpha=self.config.msm.spawn_alpha,
             leverage=self.config.msm.spawn_leverage,
             uncertainty=self.config.msm.spawn_uncertainty,
@@ -412,6 +414,13 @@ class TrailsMDCore:
         suffix = self._traj_suffix()
         states: list = []
         for i, parent in enumerate(parents):
+            if parent < 0:
+                # Recycled walker: a NEW trajectory launched from the basis state, so
+                # it must draw fresh Maxwell-Boltzmann velocities rather than inherit
+                # a parent's. Inheriting here would continue the very trajectory that
+                # was just terminated at the target, breaking the steady state.
+                states.append(fallback[i])
+                continue
             endstate = iter_dir / f"iteration_{self.iteration}_{parent}.{suffix}.endstate.npz"
             if not endstate.exists():
                 states.append(fallback[i])

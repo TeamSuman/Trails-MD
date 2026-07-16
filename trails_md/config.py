@@ -93,6 +93,14 @@ class SpawningConfig(BaseModel):
     # Default False = exploration mode (independent restarts; fast discovery, no
     # rate). See the "exploration vs kinetics" section of the docs.
     inherit_velocities: bool = False
+    # Source->sink recycling (steady-state rate mode). `recycle_target` is a CV-space
+    # box [[lo, hi], ...] per dimension: a walker landing inside it is terminated and
+    # its weight restarted from `recycle_basis_index` (a frame index; 0 = the initial
+    # structure). This drives a non-equilibrium steady state whose flux into the
+    # target gives MFPT = 1/flux (Hill relation) -- the same estimator WESTPA uses,
+    # which is what makes the two directly comparable. Requires spawn_scheme: we.
+    recycle_target: list[list[float]] | None = None
+    recycle_basis_index: int = 0
     resolution_check_patience: int = 5
     resolution_max_bins: int = 150
     voronoi_max_clusters: int = 5000
@@ -437,6 +445,25 @@ class TrailsMDConfig(BaseModel):
         if value not in {"fixed", "vamp_adaptive"}:
             raise ValueError("retrain_policy must be 'fixed' or 'vamp_adaptive'")
         return value
+
+    @model_validator(mode="after")
+    def _recycling_requirements(self):
+        """Recycling drives a source->sink steady state, which only weighted
+        ensemble maintains (it needs conserved weights and a live ensemble)."""
+        if self.spawning.recycle_target is not None:
+            if self.spawning.spawn_scheme != "we":
+                raise ValueError(
+                    "spawning.recycle_target (steady-state rate mode) requires "
+                    "spawn_scheme: we -- recycling only makes sense for a "
+                    "weight-conserving weighted-ensemble run."
+                )
+            for i, box in enumerate(self.spawning.recycle_target):
+                if len(box) != 2 or box[0] >= box[1]:
+                    raise ValueError(
+                        f"spawning.recycle_target[{i}] must be [low, high] with "
+                        f"low < high; got {box}."
+                    )
+        return self
 
     @model_validator(mode="after")
     def _kinetics_mode_requirements(self):

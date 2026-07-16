@@ -41,6 +41,8 @@ class WESpawner(Spawner):
         max_values: list[float] | None = None,
         target_per_bin: int = 4,
         seed: int = 42,
+        recycle_target: list[list[float]] | None = None,
+        recycle_basis_index: int = 0,
         **kwargs: Any,
     ):
         super().__init__(seed=seed, **kwargs)
@@ -49,6 +51,20 @@ class WESpawner(Spawner):
         self.max_values = max_values
         self.target_per_bin = int(target_per_bin)
         self.we = WeightedEnsemble(target_per_bin=target_per_bin)
+        # --- source->sink recycling (steady-state rate mode) ------------------
+        # `recycle_target` is a CV-space box [[lo, hi], ...] per dimension. A walker
+        # whose endpoint lands inside it is TERMINATED and its weight restarted from
+        # the basis (source) frame. That drives a non-equilibrium steady state, and
+        # the recycled weight per tau IS the probability flux into the target, so
+        # MFPT = 1 / steady-state flux (Hill relation) -- the same estimator WESTPA
+        # uses, which is what makes the two directly comparable.
+        self.recycle_target = (
+            np.asarray(recycle_target, dtype=float) if recycle_target else None
+        )
+        self.recycle_basis_index = int(recycle_basis_index)
+        # Recycled weight per iteration; the flux time series the MFPT is read from
+        # (after discarding the pre-steady-state transient).
+        self.flux_history: list[float] = []
         # Statistical weight of each walker spawned last iteration (sums to 1).
         # These are WALKER weights, carried down the lineage -- not per-frame
         # weights over the cumulative cloud (see `sample`).
@@ -97,6 +113,13 @@ class WESpawner(Spawner):
         ends = np.minimum(np.arange(1, n_live + 1) * fpw - 1, len(points) - 1)
 
         weights = self._live_weights(n_live)
+        end_cvs = cumulative[offset + ends]
+
+        # RECYCLE FIRST, THEN RESAMPLE -- the WESTPA order. A walker that reached the
+        # target is terminated here: its weight is booked as flux and restarted from
+        # the basis, so by the time we bin, it is *at the source* and bins there.
+        recycled = self._recycle(end_cvs, weights, cumulative)
+
         # Bin the LIVE ENSEMBLE, not the cumulative cloud. This is not a detail: an
         # adaptive binner (MAB) gives the leading frame its own dedicated bin, and if
         # the binner is fitted to the cumulative cloud that leading frame is usually a
@@ -105,7 +128,7 @@ class WESpawner(Spawner):
         # ratchet never engages -- the run then behaves exactly like the unweighted
         # control. Binning the live walkers is also what MAB/WESTPA actually do: bins
         # are re-laid over the current ensemble every iteration.
-        labels = self._bin_labels(cumulative[offset + ends])
+        labels = self._bin_labels(end_cvs)
 
         parents, new_weights = self._resample_to_budget(
             weights, labels, top_n, self.rng
@@ -116,8 +139,45 @@ class WESpawner(Spawner):
         # from (with repeats for splits). The orchestrator uses these to inherit
         # each parent's endpoint velocities. Exposed as an attribute rather than
         # returned, to keep the sample() contract (a list of frame indices) intact.
-        self.selected_parents = [int(p) for p in parents]
-        return [int(offset + ends[p]) for p in parents]
+        # A recycled parent is marked -1: it is a NEW trajectory launched from the
+        # basis, so it must draw fresh Maxwell-Boltzmann velocities rather than
+        # inherit -- which is exactly what WESTPA does when it restarts a bstate.
+        self.selected_parents = [-1 if recycled[p] else int(p) for p in parents]
+        return [
+            int(self.recycle_basis_index if recycled[p] else offset + ends[p])
+            for p in parents
+        ]
+
+    def _recycle(self, end_cvs: np.ndarray, weights: np.ndarray,
+                 cumulative: np.ndarray) -> np.ndarray:
+        """Terminate walkers that reached the target; restart their weight at the basis.
+
+        Returns a per-live-walker boolean mask of who was recycled. ``end_cvs`` is
+        modified in place so a recycled walker is subsequently binned *at the basis*.
+
+        The recycled weight this iteration is the probability flux into the target
+        over one tau. Weight is conserved exactly -- nothing is created or destroyed,
+        it is simply moved back to the source -- which is what sustains the
+        non-equilibrium steady state the Hill relation needs.
+        """
+        n = len(end_cvs)
+        if self.recycle_target is None:
+            return np.zeros(n, dtype=bool)
+
+        recycled = self._in_region(end_cvs, self.recycle_target)
+        self.flux_history.append(float(weights[recycled].sum()))
+        if recycled.any():
+            end_cvs[recycled] = cumulative[self.recycle_basis_index]
+        return recycled
+
+    @staticmethod
+    def _in_region(cvs: np.ndarray, region: np.ndarray) -> np.ndarray:
+        """Which rows of ``cvs`` lie inside the CV-space box ``region`` ([lo, hi] per dim)."""
+        ndim = min(cvs.shape[1], region.shape[0])
+        inside = np.ones(len(cvs), dtype=bool)
+        for d in range(ndim):
+            inside &= (cvs[:, d] >= region[d, 0]) & (cvs[:, d] <= region[d, 1])
+        return inside
 
     def _live_weights(self, n_live: int) -> np.ndarray:
         """Weights of the live walkers, inherited from the previous resampling."""
@@ -208,12 +268,35 @@ class WESpawner(Spawner):
     def state_dict(self) -> dict:
         state = super().state_dict()
         state["weights"] = None if self.weights is None else self.weights.tolist()
+        # The flux series IS the rate measurement -- checkpoint it, or a resumed run
+        # silently loses the observable the whole kinetics mode exists to produce.
+        state["flux_history"] = list(self.flux_history)
         return state
 
     def load_state_dict(self, state: dict) -> None:
         super().load_state_dict(state)
         if state and state.get("weights") is not None:
             self.weights = np.asarray(state["weights"], dtype=float)
+        if state and state.get("flux_history") is not None:
+            self.flux_history = list(state["flux_history"])
+
+    def mfpt(self, tau_ps: float, discard_fraction: float = 0.5) -> float | None:
+        """Steady-state MFPT (ns) from the recycled-flux series, via the Hill relation.
+
+        The early iterations are a transient: the ensemble has not yet reached the
+        non-equilibrium steady state, and the flux during that ramp-up systematically
+        UNDERESTIMATES the rate. So the leading ``discard_fraction`` of the series is
+        dropped before averaging -- reporting the un-discarded average is the single
+        most common way a WE rate is wrong. Returns None if nothing has been recycled
+        yet (no flux -> no rate, rather than an infinite one).
+        """
+        if not self.flux_history:
+            return None
+        n_skip = int(len(self.flux_history) * discard_fraction)
+        tail = np.asarray(self.flux_history[n_skip:], dtype=float)
+        if tail.size == 0 or tail.mean() <= 0:
+            return None
+        return float(tau_ps / tail.mean() / 1000.0)  # tau/flux -> ps -> ns
 
 
 
