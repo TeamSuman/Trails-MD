@@ -237,8 +237,7 @@ class WESpawner(Spawner):
                 continue
             members = np.flatnonzero(inverse == b).tolist()
             mweights = [float(weights[i]) for i in members]
-            members, mweights = WeightedEnsemble._merge(members, mweights, target, rng)
-            members, mweights = WeightedEnsemble._split(members, mweights, target)
+            members, mweights = self._resample_bin(members, mweights, target, rng)
             parents_out.extend(int(m) for m in members)
             weights_out.extend(float(w) for w in mweights)
 
@@ -248,6 +247,46 @@ class WESpawner(Spawner):
         if total > 0:
             weights_out = [w / total for w in weights_out]
         return parents_out, weights_out
+
+    @staticmethod
+    def _resample_bin(members, mweights, target, rng, spread_tol: float = 4.0,
+                      max_rounds: int = 200):
+        """Split/merge one bin to ``target`` walkers of APPROXIMATELY EQUAL weight.
+
+        Reaching the right walker *count* is not enough -- the weights within a bin
+        must also be equalised to ~bin_weight/target. Getting only the count right
+        (merge the two lightest, split the heaviest, stop) leaves light walkers to
+        merge with *each other* forever, never absorbed into the heavy ones. They
+        survive as "zombies" carrying ~1e-21: they occupy a walker slot, cost a full
+        MD segment, and contribute nothing. Measured on a real alanine run before this
+        fix: 13/40 walkers below 1e-10, weights spanning 1e20 *within a single bin*,
+        and an effective sample size (1/sum w^2) of **3.6 of 40 walkers**. The flux
+        then decays without bound, because the walkers reaching the target are
+        increasingly zombies delivering no weight -- a plausible, badly wrong rate.
+
+        So after fixing the count we equalise: merge the two lightest and split the
+        heaviest in tandem (which leaves the count unchanged) until the spread is
+        within ``spread_tol``. Each round raises the minimum and lowers the maximum,
+        so it converges; once the zombies are exhausted they merge into a real walker
+        and their slot is freed for a split of a heavy one. Weight is conserved
+        throughout -- merging sums weight and splitting halves it.
+        """
+        members, mweights = WeightedEnsemble._merge(members, mweights, target, rng)
+        members, mweights = WeightedEnsemble._split(members, mweights, target)
+
+        if target < 2:
+            return members, mweights
+        for _ in range(max_rounds):
+            lo, hi = min(mweights), max(mweights)
+            if lo > 0 and hi <= spread_tol * lo:
+                break
+            # merge the two lightest (count -> target-1), then split the heaviest
+            # (count -> target): the spread shrinks, the count is unchanged.
+            members, mweights = WeightedEnsemble._merge(
+                members, mweights, target - 1, rng
+            )
+            members, mweights = WeightedEnsemble._split(members, mweights, target)
+        return members, mweights
 
     def _bin_labels(self, cumulative: np.ndarray) -> np.ndarray:
         if self.binner is not None:

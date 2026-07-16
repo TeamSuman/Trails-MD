@@ -100,3 +100,70 @@ def test_weights_are_inherited_not_reset_each_iteration():
     # Not a uniform reset, and the light (frontier) tail keeps shrinking.
     assert not np.allclose(second, 1.0 / 4)
     assert second[0] <= first[0] + 1e-12
+
+
+def test_resampling_equalises_weights_no_zombie_walkers():
+    """Within a bin, resampling must EQUALISE weights -- not just fix the count.
+
+    Getting only the count right lets light walkers merge with each other forever,
+    never absorbed into the heavy ones. They survive as "zombies" carrying ~1e-21:
+    they hold a walker slot, cost a full MD segment, and contribute nothing. On a
+    real alanine run this collapsed the effective sample size to 3.6 of 40 walkers
+    and made the flux (hence the rate) decay without bound.
+    """
+    from trails_md.spawners.we import WESpawner
+
+    # one bin, one heavy walker + four zombies -- the exact pathology observed
+    members = [0, 1, 2, 3, 4]
+    mweights = [0.4, 1e-21, 1e-21, 1e-21, 1e-21]
+    out_m, out_w = WESpawner._resample_bin(
+        members, mweights, target=4, rng=np.random.default_rng(0)
+    )
+    out_w = np.asarray(out_w)
+
+    assert len(out_m) == 4                                   # count respected
+    assert out_w.sum() == pytest.approx(0.4)                 # weight conserved
+    assert out_w.max() <= 4.0 * out_w.min()                  # weights equalised
+    assert (out_w > 1e-6).all()                              # no zombies survive
+    # effective sample size should be ~the walker count, not ~1
+    ess = 1.0 / np.sum((out_w / out_w.sum()) ** 2)
+    assert ess > 3.0
+
+
+def test_within_bin_weights_stay_equal_over_many_iterations():
+    """A proper WE random walk: walkers MOVE and their weights follow them.
+
+    This is the honest version of the steady-state check. Positions must track the
+    resampled walkers (children inherit the parent's position), or the test decouples
+    weights from positions and measures nothing. Across bins, WE weights are meant to
+    be wildly unequal -- that is how it samples improbable regions. What must NOT
+    happen is unequal weights WITHIN a bin: that is the zombie pathology.
+    """
+    from trails_md.spawners.we import WESpawner
+
+    fpw = 10
+    rng = np.random.default_rng(0)
+    pos = rng.uniform(0.0, 10.0, 24)          # all walkers start in the source basin
+    sp = WESpawner(n_bins=[6, 1], min_values=[0.0, -1.0], max_values=[60.0, 1.0],
+                   target_per_bin=4, seed=0)
+
+    for _ in range(60):
+        pts = np.column_stack([np.repeat(pos, fpw), np.zeros(len(pos) * fpw)])
+        chosen = sp.sample(pts, top_n=len(pos))
+        # children inherit the parent's position, then diffuse (biased slightly uphill)
+        parents = np.asarray(sp.selected_parents)
+        pos = pos[parents] + rng.normal(0.4, 1.5, len(parents))
+        pos = np.clip(pos, 0.0, 60.0)
+
+    w = np.asarray(sp.weights, float)
+    assert w.sum() == pytest.approx(1.0)
+    # WITHIN each bin the weights must be comparable -- no zombie slots
+    b = np.clip((pos / 10.0).astype(int), 0, 5)
+    for bin_id in np.unique(b):
+        m = b == bin_id
+        if m.sum() > 1:
+            wb = w[m]
+            assert wb.max() <= 1e3 * wb.min(), (
+                f"bin {bin_id}: within-bin weight spread {wb.max()/wb.min():.1e} "
+                f"-- zombie walkers holding slots but no weight"
+            )
