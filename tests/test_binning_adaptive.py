@@ -99,7 +99,7 @@ def test_bucket_frames_matches_the_naive_loop():
         exp_data[r].append(frame)
 
     assert np.array_equal(pops, exp_pops)
-    for got, exp in zip(data, exp_data):
+    for got, exp in zip(data, exp_data, strict=True):
         assert np.array_equal(np.asarray(got, dtype=int), np.asarray(exp, dtype=int))
 
 

@@ -61,12 +61,29 @@ def test_walker_in_target_is_recycled_and_flux_booked():
 
 
 def test_recycling_conserves_weight():
-    """Recycling moves weight back to the source -- it never creates or destroys it."""
+    """Recycling MOVES weight back to the source -- it never creates or destroys it.
+
+    `sp.weights.sum() == 1` proves nothing on its own. `_resample_to_budget` finishes
+    by rescaling, so that sum was a tautology: it held for whatever weights the
+    function produced. Weight could be destroyed outright in `_recycle` -- the precise
+    bug this docstring names -- and the rescale would paper over it, here and even in
+    the end-to-end MFPT test. Conservation is now a checked invariant in the spawner
+    (a real leak raises rather than being renormalised away), so `sample()` below is
+    the assertion; the sum is just the visible half of it.
+    """
     sp = _spawner()
     pts = _ensemble(np.array([1.0, 2.0, 95.0, 120.0]))
     for _ in range(5):
-        sp.sample(pts, top_n=4)
+        sp.sample(pts, top_n=4)  # raises if any weight leaked
         assert sp.weights.sum() == pytest.approx(1.0)
+
+    # Two of the four walkers sit in the target every iteration, so weight must arrive
+    # as flux every iteration. A rescale cannot fabricate this: it is read off the
+    # incoming weights before any normalisation.
+    assert len(sp.flux_history) == 5
+    assert all(f > 0 for f in sp.flux_history), (
+        f"weight stopped reaching the target: {sp.flux_history}"
+    )
 
 
 def test_recycled_walkers_restart_at_the_basis_with_fresh_velocities():
@@ -78,9 +95,30 @@ def test_recycled_walkers_restart_at_the_basis_with_fresh_velocities():
 
     recycled_slots = [i for i, p in enumerate(sp.selected_parents) if p < 0]
     assert recycled_slots, "the target walker should have produced recycled offspring"
-    # -1 tells the orchestrator to draw fresh velocities (not inherit a parent's)
+    # The contract is `selected_parents == -1`, and ONLY that: it tells the
+    # orchestrator both to draw fresh velocities and to restart from the basis
+    # structure (see TrailsMDCore._recycling_basis_state). The frame index returned
+    # for a recycled slot is a placeholder the orchestrator overrides -- an index can
+    # only ever address the current iteration's frames, so it cannot name the basis
+    # after iteration 0. Asserting `chosen[i] == 0` here, as this test once did, only
+    # restated that a constant equals itself; the property that matters is tested in
+    # tests/test_we_recycling_basis.py.
     for i in recycled_slots:
-        assert chosen[i] == 0  # restarted from the basis frame
+        assert sp.selected_parents[i] == -1
+    # A walker that did NOT reach the target must continue from its own endpoint --
+    # i.e. the LAST frame of its parent's block, not merely "some frame that isn't 0".
+    # This used to read `assert chosen[i] != 0 or parent == 0`, which constrained
+    # nothing: a non-recycled index is `offset + ends[p]`, one of {9, 19, 29, 39}, so
+    # it is never 0 and the assertion was satisfied before it was evaluated. Pin the
+    # exact frame instead: `sample()`'s return value decides which structure a walker
+    # actually restarts from whenever velocity inheritance is off, so an off-by-a-few
+    # index silently restarts every walker mid-segment.
+    for i, parent in enumerate(sp.selected_parents):
+        if parent >= 0:
+            assert chosen[i] == (parent + 1) * FPW - 1, (
+                f"walker {i} continues from frame {chosen[i]}, but its parent "
+                f"{parent}'s endpoint is frame {(parent + 1) * FPW - 1}"
+            )
 
 
 def test_no_flux_when_nothing_reaches_the_target():

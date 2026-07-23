@@ -116,6 +116,10 @@ class TrailsMDCore:
         # State variables
         self.iteration = 0
         self.history = {}
+        # Structure a recycled walker restarts from (source->sink kinetics mode).
+        # Captured once, on the first spawn, and thereafter held fixed -- see
+        # `_recycling_basis_state` for why a frame index cannot carry this.
+        self._basis_state: dict[str, Any] | None = None
         self.occupancy_history = []
         self.bin_state = {}
         self.scaler = None
@@ -421,7 +425,14 @@ class TrailsMDCore:
                 # was just terminated at the target, breaking the steady state.
                 states.append(fallback[i])
                 continue
-            endstate = iter_dir / f"iteration_{self.iteration}_{parent}.{suffix}.endstate.npz"
+            # `parent` indexes the LIVE ensemble, but endstate files are named by the
+            # RAW walker index. Those coincide only when nothing failed; after a drop
+            # they diverge, and the walker would silently inherit velocities from a
+            # different trajectory than its positions -- continuous-looking dynamics
+            # stitched from two different walkers.
+            live = getattr(self, "_live_walker_indices", None)
+            raw = live[parent] if live is not None and parent < len(live) else parent
+            endstate = iter_dir / f"iteration_{self.iteration}_{raw}.{suffix}.endstate.npz"
             if not endstate.exists():
                 states.append(fallback[i])
                 continue
@@ -434,6 +445,102 @@ class TrailsMDCore:
                 }
             )
         return states
+
+    def _recycling_basis_state(
+        self,
+        feature_extractor,
+        sampling_trajectories: list[str],
+        basis_index: int,
+        expected_cv: Any = None,
+        observed_cv: Any = None,
+    ) -> dict[str, Any]:
+        """Structure a recycled walker restarts from, captured once and held fixed.
+
+        A recycled walker is a new trajectory launched from the basis (source) state,
+        and its weight is booked as flux into the target. The spawner names it by
+        frame index -- but WE does not pool history, so an index only ever addresses
+        the CURRENT iteration's frames. At iteration N, `basis_index` therefore
+        resolves to wherever walker `basis_index` happens to be *now*, which is not
+        the basis. If that walker has drifted toward the target, the recycled walker
+        restarts next to the sink, re-enters almost immediately, and the flux -- hence
+        MFPT = 1/flux -- is biased fast. The index cannot carry this; only the
+        structure can.
+
+        Capturing on the first spawn matches `WESpawner.basis_cv`, which freezes on
+        its first call for exactly the same reason, so the CV a recycled walker is
+        binned at and the structure it actually restarts from are the same state.
+        Persisted to disk so a resumed run reloads the original basis instead of
+        re-capturing from a mid-run frame.
+        """
+        import numpy as np
+        from openmm import Vec3
+        from openmm.unit import nanometer
+
+        if self._basis_state is not None:
+            return self._basis_state
+
+        path = self.outdir / "recycling_basis_state.npz"
+        if path.exists():
+            data = np.load(path)
+            box = data["box"]
+            self._basis_state = {
+                "positions": data["positions"] * nanometer,
+                "box_vectors": (
+                    None
+                    if box.shape[0] == 0
+                    else tuple(Vec3(*row) * nanometer for row in box)
+                ),
+            }
+            return self._basis_state
+
+        # Fresh capture. The CV a recycled walker is BINNED at (the spawner's frozen
+        # `basis_cv`) and the structure it RESTARTS from (captured here) live in two
+        # separate persistence paths -- the spawner checkpoint and an .npz -- so
+        # nothing but this check keeps them describing the same state. On a fresh run
+        # they agree by construction. They disagree exactly when the spawner restored
+        # `basis_cv` from a checkpoint but the .npz is absent (an interrupted or
+        # hand-moved run dir): the structure would then be re-captured from a mid-run
+        # frame while the CV stayed original, reinstating the very drift this exists to
+        # prevent -- and doing it silently, since a plausible structure is still
+        # produced. Refuse rather than emit a biased rate.
+        if expected_cv is not None and observed_cv is not None:
+            expected_arr = np.asarray(expected_cv, dtype=float)
+            observed_arr = np.asarray(observed_cv, dtype=float)
+            if not np.allclose(expected_arr, observed_arr):
+                raise RuntimeError(
+                    "Recycling basis is inconsistent: the spawner is binning recycled "
+                    f"walkers at CV {expected_arr.tolist()}, but frame {basis_index} of "
+                    f"this iteration -- the frame the basis structure would be captured "
+                    f"from -- is at CV {observed_arr.tolist()}. This usually means the "
+                    "run resumed from a checkpoint while "
+                    f"'{path.name}' was missing, so the structure would come from a "
+                    "mid-run frame and the recycled walkers would restart somewhere "
+                    "other than the source, biasing MFPT = 1/flux. Restore that file "
+                    "from the original run directory, or start a fresh run."
+                )
+
+        state = feature_extractor.extract_positions_by_indices(
+            sampling_trajectories, [basis_index]
+        )[0]
+        box_vectors = state.get("box_vectors")
+        box_array = (
+            np.zeros((0, 3), dtype=float)
+            if box_vectors is None
+            else np.array(
+                [list(v.value_in_unit(nanometer)) for v in box_vectors], dtype=float
+            )
+        )
+        # np.savez appends ".npz" to a name that lacks it, which silently breaks an
+        # atomic rename onto `path`; write to a temp that already carries the suffix.
+        tmp = path.with_name(path.name + ".tmp.npz")
+        np.savez(
+            tmp,
+            positions=np.asarray(state["positions"].value_in_unit(nanometer), dtype=float),
+            box=box_array,
+        )
+        tmp.replace(path)
+        self._basis_state = state
+        return self._basis_state
 
     def run_iteration(self, walkers: list[Any]):
         """Run a single adaptive sampling iteration."""
@@ -524,6 +631,12 @@ class TrailsMDCore:
         # failed ones (and their lineage parents) so downstream indexing stays
         # consistent. When every walker succeeds this is a no-op.
         ok_indices = [idx for idx, ok in enumerate(results) if ok]
+        # Publish the survivor mapping for spawners that carry per-walker state across
+        # iterations (weighted ensemble carries WEIGHTS). Walker i of the live ensemble
+        # is walker ok_indices[i] of the previous resampling; without that mapping a
+        # spawner can only guess, and a wrong guess re-attaches weights to the wrong
+        # trajectories while sum(w) == 1 still holds -- silent, and fatal to a rate.
+        self._live_walker_indices = list(ok_indices)
         if len(ok_indices) < n_walkers:
             logging.warning(
                 "Iteration %d: %d/%d walkers failed; continuing with %d survivors.",
@@ -665,6 +778,16 @@ class TrailsMDCore:
             self.spawner.cluster_model = getattr(
                 self.msm_estimator, "_cluster_model", None
             )
+        # Which of last iteration's walkers survived. A weighted-ensemble spawner
+        # cannot infer this from the frame count: failed walkers are dropped, so the
+        # frames it receives are the survivors' only, and guessing the ensemble size
+        # geometrically misaligns walker <-> weight <-> endpoint (see
+        # WESpawner._live_weights). `self._live_walker_indices` is set wherever the
+        # failed walkers are dropped, and indexes the PREVIOUS resampling's output.
+        if hasattr(self.spawner, "live_walker_indices"):
+            self.spawner.live_walker_indices = getattr(
+                self, "_live_walker_indices", None
+            )
         # Spawners that only ever pick from the CURRENT walkers (weighted ensemble --
         # a historical frame has no well-defined weight) must not be handed the
         # history, and must not have it pooled for index mapping either: pooling costs
@@ -704,6 +827,38 @@ class TrailsMDCore:
         next_walkers = feature_extractor.extract_positions_by_indices(
             sampling_trajectories, spawn_indices
         )
+        # Source->sink recycling: a recycled walker (parent -1) must restart from the
+        # BASIS structure. `spawn_indices` cannot express that -- see
+        # `_recycling_basis_state` -- so substitute the frozen basis here, before
+        # velocity inheritance, which already treats parent -1 as a fresh-velocity
+        # start and so needs only the right positions underneath it.
+        if getattr(self.config.spawning, "recycle_target", None) is not None:
+            # Capture on the FIRST spawn, whether or not anything recycled this
+            # iteration: the spawner freezes `basis_cv` on its first sample() call,
+            # and the CV and the structure must be captured from the same state.
+            # Deferring to the first recycling event would re-introduce the very
+            # drift this exists to prevent.
+            basis_index = int(
+                getattr(self.config.spawning, "recycle_basis_index", 0)
+            )
+            # Cross-check the structure against the CV the spawner froze; see
+            # `_recycling_basis_state`. `points` and `sampling_trajectories` index the
+            # same frames here (WE does not pool history), so points[basis_index] is
+            # the CV of the very frame the structure is taken from.
+            basis = self._recycling_basis_state(
+                feature_extractor,
+                sampling_trajectories,
+                basis_index,
+                expected_cv=getattr(self.spawner, "basis_cv", None),
+                observed_cv=(
+                    points[basis_index] if basis_index < len(points) else None
+                ),
+            )
+            parents = getattr(self.spawner, "selected_parents", None)
+            if parents is not None:
+                for i, parent in enumerate(parents):
+                    if parent < 0:
+                        next_walkers[i] = dict(basis)
         # Kinetics mode: replace the position-only start states with full endpoint
         # States (positions + velocities + box) of the parent walkers, so the next
         # segment CONTINUES the dynamics instead of redrawing velocities. Only WE
@@ -767,12 +922,31 @@ class TrailsMDCore:
                 cumulative_frames = 0
             bin_occupancy_str = f"{occupied_bins}/{total_bins}"
 
-            # Adaptive resolution check
-            self._update_resolution_and_convergence(occupied_bins)
-
         except Exception as e:
             bin_occupancy_str = "N/A"
-            logging.debug(f"Failed to compute bin occupancy: {e}")
+            # WARNING, not DEBUG: occupancy is a reported diagnostic, and at the
+            # default log level a DEBUG line is invisible.
+            logging.warning(
+                "Iteration %d: failed to compute bin occupancy: %s",
+                self.iteration,
+                e,
+            )
+
+        # Adaptive resolution + convergence. Deliberately OUTSIDE the occupancy
+        # try/except that used to enclose it: any exception raised while computing
+        # occupancy also disabled resolution bumps AND convergence detection for the
+        # remainder of the run, visible only as "bin_occupancy: N/A" plus a DEBUG
+        # line -- so a campaign could run to completion having silently never
+        # evaluated convergence. A failure here is worth surfacing on its own.
+        try:
+            self._update_resolution_and_convergence(occupied_bins)
+        except Exception as e:
+            logging.warning(
+                "Iteration %d: resolution/convergence update failed: %s. "
+                "Convergence was NOT evaluated for this iteration.",
+                self.iteration,
+                e,
+            )
 
         # MSM estimation + MSM-based convergence (opt-in).
         self._maybe_build_msm()

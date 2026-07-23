@@ -59,7 +59,13 @@ def _we_mfpt(n_walkers=40, iters=3000, seed=0):
     pos = np.zeros(n_walkers)
     for _ in range(iters):
         pts = np.column_stack([np.repeat(pos, FPW), np.zeros(n_walkers * FPW)])
-        pts[0, 0] = 0.0                       # frame 0 IS the basis (x = 0)
+        # This loop models the orchestrator's contract exactly (see
+        # TrailsMDCore._recycling_basis_state): the frame index sample() returns is
+        # IGNORED, and a walker marked parent -1 restarts from the frozen basis
+        # (x = 0) with fresh velocities. Do not "help" the spawner by pinning
+        # pts[0] = 0 to make frame 0 the basis, as this harness once did: that
+        # manufactured, inside the test, the very invariant production code has to
+        # establish for itself, and it hid a real bug for the whole of development.
         sp.sample(pts, top_n=n_walkers)
         parents = np.asarray(sp.selected_parents)
         child = np.where(parents < 0, 0.0, pos[np.clip(parents, 0, None)])

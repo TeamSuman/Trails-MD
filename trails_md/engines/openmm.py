@@ -193,7 +193,29 @@ class OpenMMEngine(MDEngine):
                 barostat.setRandomNumberSeed(self.seed)
             self.system.addForce(barostat)
 
+        # Both construction paths above have produced an integrator by now. This must
+        # stay inside __init__: OpenMM's default is 1e-5, so if it is skipped the run
+        # silently uses a constraint tolerance 10x looser than configured.
         self.integrator.setConstraintTolerance(self.constraintTolerance)
+
+    def _reseed_barostat(self, seed: int) -> bool:
+        """Point every MonteCarloBarostat in the System at ``seed``.
+
+        Returns whether one was found, so a caller can tell "reseeded" from "no
+        barostat present" rather than assuming success.
+        """
+        from openmm import MonteCarloBarostat  # type: ignore
+
+        system = getattr(self, "system", None)
+        if system is None:
+            return False
+        found = False
+        for i in range(system.getNumForces()):
+            force = system.getForce(i)
+            if isinstance(force, MonteCarloBarostat):
+                force.setRandomNumberSeed(int(seed))
+                found = True
+        return found
 
     @staticmethod
     def _cpu_thread_count() -> int | None:
@@ -255,8 +277,18 @@ class OpenMMEngine(MDEngine):
         # because the thermostat RNG is re-derived from the new seed on
         # reinitialize (a naive reseed without reinitialize does NOT — verified).
         if self._warm_reuse and self.simulation is not None:
-            if self.seed is not None and getattr(self, "integrator", None) is not None:
-                self.integrator.setRandomNumberSeed(self.seed)
+            if self.seed is not None:
+                if getattr(self, "integrator", None) is not None:
+                    self.integrator.setRandomNumberSeed(self.seed)
+                # The barostat is a Force, seeded once in prepare() with whichever
+                # walker built this Context. rearm_for_walker() only updates
+                # self.seed, so without this every walker sharing a cached Context
+                # would run the whole campaign on ONE barostat RNG stream -- the cold
+                # path seeds it per walker, so warm and cold would silently disagree
+                # and the "identical to a fresh build" guarantee above would be false.
+                # Same class of defect as the integrator seed that once never reached
+                # make_system: one Force further down.
+                self._reseed_barostat(self.seed)
             self.simulation.context.reinitialize(preserveState=False)
             self.simulation.context.setPositions(self.positions)
             return
@@ -415,7 +447,36 @@ class OpenMMEngine(MDEngine):
             self.simulation.step(steps)
             success = True
         except Exception as e:
-            print(f"Production run failed ({e}), attempting reinitialize+recovery...")
+            import logging
+
+            # Recovery redraws velocities and MINIMIZES -- it does not resume the
+            # walker, it replaces it. In kinetics mode that is not a recovery at all:
+            # the walker carries statistical weight, its inherited velocities are the
+            # continuity the WE rate depends on, and a minimized restart is simply
+            # different dynamics. Returning success there would keep the weight, write
+            # the endstate, and let a walker whose trajectory was quietly substituted
+            # contaminate the flux with nothing in the record to find afterwards.
+            # `save_endstate` is set exactly when inherit_velocities is on, so it is
+            # the kinetics-mode marker. Fail the walker instead and let
+            # min_success_fraction decide -- a dropped walker is recoverable, a
+            # silently wrong rate is not.
+            if self.save_endstate:
+                logging.error(
+                    "Walker failed during production (%s). Refusing to recover by "
+                    "minimisation: this is kinetics mode, where recovery would "
+                    "replace the walker's dynamics while keeping its weight and "
+                    "silently bias the flux. Failing the walker instead.",
+                    e,
+                )
+                self.simulation.reporters = []
+                if os.path.exists(traj_out_str):
+                    os.remove(traj_out_str)
+                return False
+            logging.warning(
+                "Production run failed (%s), attempting reinitialize+recovery. "
+                "The recovered segment is a minimised restart, NOT a continuation.",
+                e,
+            )
             self.simulation.reporters = []
             if os.path.exists(traj_out_str):
                 os.remove(traj_out_str)

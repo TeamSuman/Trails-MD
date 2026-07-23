@@ -72,6 +72,21 @@ def test_we_spawner_records_selected_parents():
     assert len(sp.selected_parents) == len(idx)
     # every parent is a valid current-walker index
     assert all(0 <= p < len(progress) for p in sp.selected_parents)
+    # A range check is not enough on its own: `selected_parents = [0, 0, ...]` -- every
+    # walker inheriting walker 0's velocities -- satisfies it, and that is exactly the
+    # bug this test is named for, since the orchestrator reads these to decide whose
+    # endpoint State each child continues from. Pin parent to the frame index it must
+    # agree with: `idx[i]` is parent p's endpoint, so p is recoverable from it.
+    for i, parent in enumerate(sp.selected_parents):
+        assert idx[i] == (parent + 1) * fpw - 1, (
+            f"spawn {i} restarts from frame {idx[i]}, which is not the endpoint of "
+            f"its recorded parent {parent} (frame {(parent + 1) * fpw - 1}) -- "
+            "positions and velocities would come from different walkers"
+        )
+    # The ensemble must not collapse onto one parent (WE splits AND merges).
+    assert len(set(sp.selected_parents)) > 1, (
+        f"all spawns claim the same parent: {sp.selected_parents}"
+    )
 
 
 def _verlet_sim():

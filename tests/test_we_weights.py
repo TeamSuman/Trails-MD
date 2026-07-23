@@ -149,7 +149,7 @@ def test_within_bin_weights_stay_equal_over_many_iterations():
 
     for _ in range(60):
         pts = np.column_stack([np.repeat(pos, fpw), np.zeros(len(pos) * fpw)])
-        chosen = sp.sample(pts, top_n=len(pos))
+        sp.sample(pts, top_n=len(pos))
         # children inherit the parent's position, then diffuse (biased slightly uphill)
         parents = np.asarray(sp.selected_parents)
         pos = pos[parents] + rng.normal(0.4, 1.5, len(parents))

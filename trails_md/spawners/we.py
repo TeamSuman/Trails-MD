@@ -88,6 +88,10 @@ class WESpawner(Spawner):
         # Current-iteration walker indices each spawned walker continues from (set
         # per sample(); used by the orchestrator for velocity inheritance).
         self.selected_parents: list[int] | None = None
+        # Which of the previous iteration's walkers survived, set by the orchestrator
+        # each iteration (None -> assume all did). Needed because failed walkers are
+        # dropped upstream, so the live ensemble can be a strict subset of the budget.
+        self.live_walker_indices: list[int] | None = None
         # Optional landscape-adaptive binner (set by the orchestrator); None -> grid.
         self.binner = None
 
@@ -124,11 +128,41 @@ class WESpawner(Spawner):
         # Endpoint frame of each live walker. Frames are laid out contiguously per
         # walker (frames_per_walker = step // stride), so the last frame of block i
         # is walker i's endpoint -- the state WE is entitled to continue from.
-        n_live = max(1, min(top_n, len(points)))
+        # The live ensemble is NOT always the walker budget: the orchestrator drops
+        # walkers whose trajectory failed (min_success_fraction < 1), so it hands us
+        # only the survivors' frames. Inferring n_live geometrically as min(top_n,
+        # len(points)) then silently misaligns everything -- with 4 walkers x 10
+        # frames and one failure, len(points)=30 gives n_live=4, fpw=7, so the
+        # "endpoints" land at frames 6/13/20/27 (mid-segment), one survivor is
+        # counted twice and another is lost. Ask the orchestrator instead, and only
+        # fall back to the geometric guess when nothing told us.
+        live_indices = getattr(self, "live_walker_indices", None)
+        if live_indices is not None and len(live_indices) > 0:
+            n_live = min(len(live_indices), len(points))
+        else:
+            n_live = max(1, min(top_n, len(points)))
         fpw = max(1, len(points) // n_live)
+        # Endpoint identification assumes every live walker contributed the SAME number
+        # of frames -- that is the only reason `block i ends at (i+1)*fpw - 1` holds.
+        # Nothing upstream enforces it: `build_frame_records` checks only that the
+        # counts SUM to len(points), and `_validate_trajectory_files` accepts any
+        # non-empty file while its own docstring notes a walker "can report success yet
+        # leave a truncated file". One short trajectory would slide every subsequent
+        # endpoint into the middle of a neighbouring walker's segment -- the same
+        # silent walker<->endpoint misalignment as the failed-walker bug, from a
+        # different cause. Only enforce it when the orchestrator told us the true
+        # ensemble size; a direct caller passing an arbitrary cloud keeps the
+        # lenient geometric guess.
+        if live_indices is not None and len(points) != n_live * fpw:
+            raise ValueError(
+                f"WE received {len(points)} frames for {n_live} live walkers, which is "
+                f"not a whole number of frames per walker ({fpw}). Walker segments must "
+                "be equal length: endpoints are identified by position, so a ragged "
+                "segment misaligns walker, weight and endpoint and corrupts the rate."
+            )
         ends = np.minimum(np.arange(1, n_live + 1) * fpw - 1, len(points) - 1)
 
-        weights = self._live_weights(n_live)
+        weights = self._live_weights(n_live, live_indices)
         end_cvs = cumulative[offset + ends]
 
         # RECYCLE FIRST, THEN RESAMPLE -- the WESTPA order. A walker that reached the
@@ -195,19 +229,70 @@ class WESpawner(Spawner):
 
     @staticmethod
     def _in_region(cvs: np.ndarray, region: np.ndarray) -> np.ndarray:
-        """Which rows of ``cvs`` lie inside the CV-space box ``region`` ([lo, hi] per dim)."""
-        ndim = min(cvs.shape[1], region.shape[0])
+        """Which rows of ``cvs`` lie inside the CV-space box ``region`` ([lo, hi] per dim).
+
+        Strict on dimensionality. This used to take ``min(cvs.shape[1], region.shape[0])``
+        and truncate, which left any unspecified dimension UNBOUNDED: walkers in an
+        unrelated basin that happened to share the specified coordinate were recycled,
+        booked as flux, and the MFPT came out fast with nothing to show for it. The
+        config validator rejects a mismatch up front; this is the backstop for callers
+        that build a spawner directly.
+        """
+        if region.shape[0] != cvs.shape[1]:
+            raise ValueError(
+                f"recycle_target has {region.shape[0]} dimension(s) but the CV space "
+                f"has {cvs.shape[1]}. The target must be bounded in every dimension: "
+                f"an unbounded dimension inflates the flux and biases the MFPT fast."
+            )
         inside = np.ones(len(cvs), dtype=bool)
-        for d in range(ndim):
+        for d in range(region.shape[0]):
             inside &= (cvs[:, d] >= region[d, 0]) & (cvs[:, d] <= region[d, 1])
         return inside
 
-    def _live_weights(self, n_live: int) -> np.ndarray:
-        """Weights of the live walkers, inherited from the previous resampling."""
-        if self.weights is None or len(self.weights) != n_live:
-            # First iteration (or a walker-count change): start from uniform.
+    def _live_weights(
+        self, n_live: int, live_indices: list[int] | None = None
+    ) -> np.ndarray:
+        """Weights of the live walkers, inherited from the previous resampling.
+
+        ``live_indices`` names which of last iteration's walkers actually survived.
+        It matters whenever a walker fails (``min_success_fraction < 1``): the
+        orchestrator drops the failed one, so the survivors are a SUBSET of the
+        walkers these weights were assigned to, and walker *i* of the live ensemble
+        is walker ``live_indices[i]`` of the previous one. Matching on length alone
+        is not a sufficient guard -- the lengths can coincide while the mapping is
+        wrong, which silently re-attached weights to the wrong trajectories while
+        ``sum(w) == 1`` still held and every invariant test still passed.
+
+        A failed walker's weight cannot be honoured (its trajectory does not exist),
+        so it is dropped and the survivors renormalised. That perturbs the steady
+        state slightly, which is why the loss is logged rather than hidden.
+        """
+        import logging
+
+        if self.weights is None:
             return np.full(n_live, 1.0 / n_live, dtype=float)
+
         w = np.asarray(self.weights, dtype=float)
+        if len(w) != n_live:
+            if (
+                live_indices is not None
+                and len(live_indices) == n_live
+                and len(w) > max(live_indices, default=-1)
+            ):
+                lost = 1.0 - float(w[list(live_indices)].sum() / max(w.sum(), 1e-300))
+                logging.warning(
+                    "WE: %d walker(s) failed; carrying the %d survivors' own weights "
+                    "and renormalising (%.3g of the ensemble weight discarded).",
+                    len(w) - n_live,
+                    n_live,
+                    lost,
+                )
+                w = w[list(live_indices)]
+            else:
+                # Genuine walker-count change (or no mapping available): uniform is
+                # the only defensible start.
+                return np.full(n_live, 1.0 / n_live, dtype=float)
+
         total = w.sum()
         return w / total if total > 0 else np.full(n_live, 1.0 / n_live)
 
@@ -264,11 +349,24 @@ class WESpawner(Spawner):
             parents_out.extend(int(m) for m in members)
             weights_out.extend(float(w) for w in mweights)
 
-        # Split/merge conserve weight exactly and every bin was served, so this only
-        # mops up floating-point drift -- it is not a rescue renormalisation.
+        # Split/merge conserve weight exactly, the incoming weights sum to 1, and every
+        # occupied bin was served -- so `total` is already 1 up to floating-point drift.
+        # ASSERT that instead of assuming it. Rescaling unconditionally makes
+        # `sum(weights) == 1` a TAUTOLOGY: it holds for whatever this function returns,
+        # so every "weight is conserved" test resting on it is unfalsifiable (checked:
+        # replacing the weights with random garbage passes all of them), while a real
+        # leak -- weight destroyed in `_recycle`, a bin dropped -- gets quietly rescaled
+        # into a plausible, wrong rate. The tolerance admits FP drift and nothing else.
         total = float(np.sum(weights_out))
-        if total > 0:
-            weights_out = [w / total for w in weights_out]
+        if not np.isclose(total, 1.0, rtol=1e-9, atol=0.0):
+            raise AssertionError(
+                f"WE weight conservation violated: resampled weights sum to {total!r}, "
+                "not 1. Split/merge conserve weight and every occupied bin was served, "
+                "so this is a genuine leak (weight destroyed, or a bin dropped), not "
+                "rounding. Refusing to renormalise it away: that would hide the leak "
+                "behind a plausible, wrong rate."
+            )
+        weights_out = [w / total for w in weights_out]
         return parents_out, weights_out
 
     @staticmethod

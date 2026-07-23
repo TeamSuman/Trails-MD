@@ -65,7 +65,7 @@ def test_spawner_rng_checkpoint_continuation():
     # Instantiate spawner with a specific seed
     spawner1 = SpawnerFactory.get("density", seed=999)
     res1 = spawner1.sample(points, top_n=5)
-    
+
     # Save checkpoint state after first sample
     state = spawner1.state_dict()
     res2 = spawner1.sample(points, top_n=5)

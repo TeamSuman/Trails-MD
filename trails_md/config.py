@@ -463,6 +463,24 @@ class TrailsMDConfig(BaseModel):
                         f"spawning.recycle_target[{i}] must be [low, high] with "
                         f"low < high; got {box}."
                     )
+            # The sink definition IS the observable: MFPT = 1/flux, and flux is
+            # whatever crosses into this box. A box with fewer dimensions than the CV
+            # space used to be silently truncated to the dimensions given, leaving the
+            # rest UNBOUNDED -- so an unrelated basin that merely shared the specified
+            # coordinate was recycled and booked as flux, and the rate came out too
+            # fast with no warning. Too many dimensions were silently ignored. Neither
+            # is recoverable downstream, so both are hard errors.
+            n_dim = len(self.n_bins)
+            if len(self.spawning.recycle_target) != n_dim:
+                raise ValueError(
+                    f"spawning.recycle_target has "
+                    f"{len(self.spawning.recycle_target)} dimension(s) but the "
+                    f"sampling space has {n_dim} (n_bins={self.n_bins}). The target "
+                    f"must be bounded in EVERY dimension: an unbounded dimension "
+                    f"silently recycles walkers that never reached the target, "
+                    f"inflating the flux and biasing the MFPT fast. Give one "
+                    f"[low, high] box per dimension."
+                )
         return self
 
     @model_validator(mode="after")
