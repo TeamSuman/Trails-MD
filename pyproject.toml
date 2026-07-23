@@ -10,10 +10,9 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [
-  # TODO(release): confirm the full author list, affiliations, and ORCIDs for the
-  # publication (mirror these in CITATION.cff).
   { name = "Dibyendu Maity", email = "dibyendumaity1999@bose.res.in" },
-  { name = "Suman Chakrabarty", email = "chakrabarty.suman@gmail.com" },
+  { name = "Rupak Majumdar" },
+  { name = "Suman Chakrabarty", email = "sumanc@bose.res.in" },
 ]
 keywords = [
   "molecular-dynamics", "adaptive-sampling", "markov-state-model",
