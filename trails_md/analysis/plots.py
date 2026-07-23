@@ -183,3 +183,57 @@ def plot_convergence_report(run_dir, outfile=None, temperature=300.0):
     fig.savefig(outfile, dpi=150)
     plt.close(fig)
     return outfile
+
+
+def plot_flux_convergence(flux_history, tau_ps, discard_fraction=0.5, ax=None):
+    """Weighted-ensemble kinetics: recycled flux and the running MFPT vs iteration.
+
+    Two overlaid series on twin axes: the per-iteration recycled flux (left) and the
+    cumulative MFPT estimate over the retained tail (right). The shaded region is the
+    discarded pre-steady-state transient. A flat flux tail = a trustworthy rate.
+    """
+    from ..spawners.we import steady_state_mfpt
+
+    ax = _ax(ax)
+    flux = np.asarray([] if flux_history is None else list(flux_history), dtype=float)
+    n = flux.size
+    it = np.arange(1, n + 1)
+
+    ax.plot(it, flux, color="#8C5109", lw=1.2, marker="o", ms=2.5, label="recycled flux")
+    ax.set_xlabel("iteration")
+    ax.set_ylabel("recycled flux per τ", color="#8C5109")
+    ax.tick_params(axis="y", labelcolor="#8C5109")
+    n_skip = int(n * discard_fraction)
+    if n_skip > 0:
+        ax.axvspan(0.5, n_skip + 0.5, color="0.85", alpha=0.6, lw=0,
+                   label="discarded transient")
+
+    # running MFPT over the retained tail, as data accumulate
+    ax2 = ax.twinx()
+    running = [
+        steady_state_mfpt(flux[: k + 1], tau_ps, discard_fraction).mfpt_ns
+        for k in range(n)
+    ]
+    ax2.plot(it, running, color="#26456E", lw=1.6, label="MFPT estimate")
+    final = steady_state_mfpt(flux, tau_ps, discard_fraction)
+    if final.mfpt_ns is not None:
+        ax2.axhline(final.mfpt_ns, color="#26456E", lw=0.8, ls=":")
+        ax2.annotate(f"{final.mfpt_ns:.3g} ns", (n, final.mfpt_ns),
+                     color="#26456E", fontsize=9, va="bottom", ha="right")
+    ax2.set_ylabel("MFPT estimate (ns)", color="#26456E")
+    ax2.tick_params(axis="y", labelcolor="#26456E")
+    ax.set_title("Weighted-ensemble kinetics: flux & running MFPT")
+    return ax
+
+
+def save_flux_convergence(flux_history, tau_ps, outfile, discard_fraction=0.5):
+    """Render :func:`plot_flux_convergence` to ``outfile`` and return its path."""
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    plot_flux_convergence(flux_history, tau_ps, discard_fraction, ax=ax)
+    fig.tight_layout()
+    outfile = Path(outfile)
+    outfile.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outfile, dpi=150)
+    plt.close(fig)
+    return outfile

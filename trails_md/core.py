@@ -991,6 +991,10 @@ class TrailsMDCore:
             occupancy=bin_occupancy_str,
         )
 
+        # Kinetics mode: surface the running rate estimate so the user can watch the
+        # flux converge (only fires when source->sink recycling has booked flux).
+        self._log_kinetics_progress()
+
         return {
             "success": results,
             "spawn_indices": spawn_indices,
@@ -1898,6 +1902,29 @@ class TrailsMDCore:
             if self.config.max_values is not None and len(self.config.max_values) != dim:
                 errors.append("max_values length must match n_bins for fixed space.")
 
+    def _log_kinetics_progress(self) -> None:
+        """Log the running steady-state MFPT during a recycling (kinetics) run.
+
+        No-op unless the spawner has booked recycled flux (i.e. weighted ensemble with a
+        `recycle_target`), so ordinary exploration runs stay quiet.
+        """
+        flux = getattr(self.spawner, "flux_history", None)
+        if not flux:
+            return
+        from trails_md.spawners.we import steady_state_mfpt
+
+        tau_ps = self.config.spawning.step * self.config.engine.dt
+        r = steady_state_mfpt(flux, tau_ps)
+        if r.mfpt_ns is None:
+            return
+        note = "converged" if r.converged else "not yet converged"
+        plateau = "n/a" if r.plateau_ratio is None else f"{r.plateau_ratio:.2f}"
+        logging.info(
+            "Kinetics: MFPT ~ %.3g ns (Hill relation; %d/%d iters recycled, "
+            "flux plateau %s, %s). Read the final value with `trails-md-analyze`.",
+            r.mfpt_ns, r.n_flux_events, r.n_iterations, plateau, note,
+        )
+
     def _ensure_output_log_header(self) -> None:
         if self.output_log.exists():
             return
@@ -1912,6 +1939,7 @@ class TrailsMDCore:
             f"# walker={self.config.spawning.walker}",
             f"# step={self.config.spawning.step}",
             f"# stride={self.config.spawning.stride}",
+            f"# dt={self.config.engine.dt}",
             f"# n_bins={json.dumps(self.config.n_bins)}",
             f"# min_values={json.dumps(self.config.min_values)}",
             f"# max_values={json.dumps(self.config.max_values)}",
