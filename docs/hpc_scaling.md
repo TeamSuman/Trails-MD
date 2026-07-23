@@ -72,12 +72,14 @@ better on overhead, scale ceilings, and failure detection.
 
 ## Roadmap — ideas worth borrowing
 
-1. **Persistent worker-pool backend (highest impact).** Add a work-manager-style
-   backend that requests one allocation and keeps workers alive across
-   iterations, streaming `WalkerTask`s to them. A dependency-free first cut can
-   use an `mpi4py`/MPI backend (ubiquitous on HPC, no open ports) or a ZeroMQ
-   backend behind the existing `ExecutionBackend` interface. This removes
-   per-iteration submit latency and the array-size ceiling in one move.
+1. **Persistent worker-pool backend for schedulers (highest impact).** The **local**
+   backend already keeps workers and warm OpenMM `Context`s alive across iterations
+   (`execution.persistent_workers: true`). The remaining step is a *scheduler*
+   work-manager backend that requests one allocation and streams `WalkerTask`s to
+   long-lived multi-node workers. A dependency-free first cut can use an `mpi4py`/MPI
+   backend (ubiquitous on HPC, no open ports) or a ZeroMQ backend behind the existing
+   `ExecutionBackend` interface. This removes per-iteration submit latency and the
+   array-size ceiling in one move.
 2. **Auto-detect the array-size limit.** Array chunking
    (`execution.max_array_size`) and `%N` throttling (`execution.max_in_flight`)
    are implemented; what remains is querying the site limit automatically

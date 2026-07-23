@@ -46,27 +46,86 @@ meaningful. Do not read an MFPT off an exploration run.
 
 When you need an unbiased rate, switch to kinetics mode. Walkers continue from
 their parent's endpoint velocities, so weighted-ensemble split/merge resamples
-*unperturbed* dynamics while conserving statistical weight exactly. The weights
-then support an unbiased mean-first-passage-time estimate.
+*unperturbed* dynamics while conserving statistical weight exactly.
+
+A rate needs **two** ingredients together, not just velocity inheritance:
+
+1. `inherit_velocities: true` — continue the parent's dynamics (no fresh
+   Maxwell–Boltzmann draw), so the resampled ensemble is unbiased dynamics.
+2. `recycle_target` — a source→sink recycling box. A walker whose endpoint enters
+   the box is terminated and its weight restarted at the basis (source) frame with
+   fresh velocities. This drives a non-equilibrium steady state whose recycled
+   weight per τ *is* the probability flux into the target, so
+   **MFPT = 1 / flux** (the Hill relation — the same estimator WESTPA uses).
+
+Inheritance alone gives you continuous dynamics but **no rate**: without
+`recycle_target` no flux is booked and the MFPT is undefined.
 
 ```yaml
 spawning:
   spawn_scheme: we
   we_target_per_bin: 4
-  inherit_velocities: true   # continue dynamics; required for a valid rate
+  inherit_velocities: true              # (1) continue dynamics
+  recycle_target: [[-2.5, -1.0], [2.0, 3.0]]   # (2) sink box: one [lo, hi] per CV dimension
+  recycle_basis_index: 0                # source frame walkers restart from on recycling
 
 engine:
-  md_engine: openmm          # kinetics mode is OpenMM-only
+  md_engine: openmm                     # kinetics mode is OpenMM-only
 ```
 
-Kinetics mode requires `spawn_scheme: we` (only weighted ensemble maintains a set
-of continuable live walkers) and the OpenMM engine; the configuration is rejected
-with a clear message otherwise.
+Requirements enforced at config load (clear error otherwise):
+
+- `inherit_velocities` requires `spawn_scheme: we` **and** `md_engine: openmm`
+  (only weighted ensemble keeps a set of continuable live walkers).
+- `recycle_target` requires `spawn_scheme: we`, and must be bounded in **every** CV
+  dimension — one `[lo, hi]` box per `n_bins` axis. An unbounded dimension would
+  recycle walkers that never reached the target and bias the rate fast.
+
+A runnable, self-contained (CPU-only) example ships at
+`examples/alanine_dipeptide/config_kinetics.yaml` — a C7eq → αR rate on alanine
+dipeptide.
+
+### Reading the rate
+
+The simplest way is the analysis CLI, which reports the MFPT and writes a
+flux/running-MFPT convergence plot:
+
+```bash
+trails-md-analyze --run-dir runs/my_kinetics_run
+```
+
+```text
+Weighted-ensemble kinetics  (Hill relation:  MFPT = tau / flux)
+  MFPT estimate      : 0.352 ns
+  tau (segment)      : 2 ps
+  iterations         : 800 (412 with recycled flux)
+  discard fraction   : 0.5 (leading transient dropped)
+  flux plateau ratio : 0.98 (2nd half / 1st half of retained tail)
+  status             : converged
+  flux plot          : runs/my_kinetics_run/analysis/flux_convergence.png
+```
+
+τ (= `step * dt`) is read from the run log automatically; pass `--tau-ps` or
+`--config` if the log is unavailable, and `--discard-fraction` to change the
+transient cut. **Always check the `status` / plateau ratio** — a `NOT converged`
+line (or a still-drifting flux plot) means the steady state has not been reached and
+the run needs more iterations.
+
+During a run, the current estimate is also logged each iteration
+(`Kinetics: MFPT ~ … ns …`) so you can watch it settle.
+
+The same number is available programmatically — `spawner.mfpt(tau_ps=step * dt)` or,
+with diagnostics, `trails_md.spawners.we.steady_state_mfpt(flux_history, tau_ps)`.
+Both discard the leading `discard_fraction` as the pre-steady-state transient
+(reporting the un-discarded average is the most common way a WE rate comes out wrong)
+and return `None` until some weight has been recycled.
 
 An equivalent route to a rate is to build a **Markov state model** from the
 trajectories of an *exploration* run — see [MSM & kinetic seeding](msm.md). Use the
 MSM route when you already have exploration data; use weighted-ensemble kinetics
-mode when you want to target the rate directly.
+mode when you want to target the rate directly. Unlike the MSM route, the
+steady-state flux estimate involves **no lag time**, so it is immune to the
+lag/segment-length trap that biases short-segment MSMs.
 
 ## The intended workflow
 

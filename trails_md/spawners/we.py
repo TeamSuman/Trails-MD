@@ -455,14 +455,65 @@ class WESpawner(Spawner):
         most common way a WE rate is wrong. Returns None if nothing has been recycled
         yet (no flux -> no rate, rather than an infinite one).
         """
-        if not self.flux_history:
-            return None
-        n_skip = int(len(self.flux_history) * discard_fraction)
-        tail = np.asarray(self.flux_history[n_skip:], dtype=float)
-        if tail.size == 0 or tail.mean() <= 0:
-            return None
-        return float(tau_ps / tail.mean() / 1000.0)  # tau/flux -> ps -> ns
+        return steady_state_mfpt(self.flux_history, tau_ps, discard_fraction).mfpt_ns
 
+
+
+from dataclasses import dataclass  # noqa: E402
+
+
+@dataclass(frozen=True)
+class MFPTResult:
+    """Steady-state MFPT (Hill relation) plus the diagnostics needed to trust it."""
+
+    mfpt_ns: float | None       # None until some weight has been recycled
+    tau_ps: float               # walker segment length (= step * dt)
+    discard_fraction: float     # leading fraction dropped as pre-steady-state transient
+    n_iterations: int           # length of the flux series
+    n_flux_events: int          # iterations with non-zero recycled weight
+    tail_mean_flux: float       # mean recycled weight per tau over the retained tail
+    plateau_ratio: float | None  # mean(2nd half of tail) / mean(1st half); ~1.0 = converged
+
+    @property
+    def converged(self) -> bool:
+        """Heuristic: the retained flux has plateaued (within 20%) and has events."""
+        return (
+            self.plateau_ratio is not None
+            and 0.8 <= self.plateau_ratio <= 1.25
+            and self.n_flux_events >= 10
+        )
+
+
+def steady_state_mfpt(
+    flux_history, tau_ps: float, discard_fraction: float = 0.5
+) -> MFPTResult:
+    """MFPT (ns) from a recycled-flux series via the Hill relation ``MFPT = tau / flux``.
+
+    Drops the leading ``discard_fraction`` of the series (the pre-steady-state transient
+    systematically underestimates the rate) and averages the remaining tail. Also reports
+    a plateau ratio (second half of the tail vs first half) so a caller can tell a
+    converged steady state from a still-drifting one. ``mfpt_ns`` is ``None`` when nothing
+    has been recycled yet -- no flux means no rate, not an infinite one.
+    """
+    flux = np.asarray([] if flux_history is None else list(flux_history), dtype=float)
+    n = int(flux.size)
+    if n == 0:
+        return MFPTResult(None, tau_ps, discard_fraction, 0, 0, 0.0, None)
+
+    n_skip = int(n * discard_fraction)
+    tail = flux[n_skip:]
+    n_events = int((flux > 0).sum())
+    if tail.size == 0 or tail.mean() <= 0:
+        return MFPTResult(None, tau_ps, discard_fraction, n, n_events, 0.0, None)
+
+    tail_mean = float(tail.mean())
+    mfpt_ns = float(tau_ps / tail_mean / 1000.0)  # tau/flux -> ps -> ns
+    plateau = None
+    if tail.size >= 2:
+        h = tail.size // 2
+        first, second = tail[:h].mean(), tail[h:].mean()
+        plateau = float(second / first) if first > 0 else None
+    return MFPTResult(mfpt_ns, tau_ps, discard_fraction, n, n_events, tail_mean, plateau)
 
 
 SpawnerFactory.register("we", WESpawner)

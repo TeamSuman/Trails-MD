@@ -9,7 +9,8 @@ abstract: >-
   reconstruction of continuous kinetic pathways from highly parallelized,
   disjointed exploration stages.
 type: software
-# TODO(release): confirm ORCIDs before submitting the publication.
+# Interim metadata; full citation details (ORCIDs, journal DOI/preferred-citation)
+# will be added once the paper is accepted.
 authors:
   - family-names: Maity
     given-names: Dibyendu
@@ -25,7 +26,7 @@ authors:
     email: sumanc@bose.res.in
     affiliation: "S. N. Bose National Centre for Basic Sciences, Kolkata, India"
     # orcid: "https://orcid.org/0000-0000-0000-0000"
-version: 2.0.0
+version: 1.0.0
 license: PolyForm-Noncommercial-1.0.0
 repository-code: "https://github.com/TeamSuman/Trails-MD"
 url: "https://github.com/TeamSuman/Trails-MD"

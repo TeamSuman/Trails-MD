@@ -12,6 +12,18 @@ ones alongside Trails-MD (see [`CITATION.cff`](https://github.com/TeamSuman/Trai
 - Röblitz, S. & Weber, M. *Fuzzy spectral clustering by PCCA+.* Adv. Data Anal.
   Classif. **7**, 147–179 (2013). (PCCA+ metastable decomposition.)
 
+## Weighted ensemble & kinetics
+
+- Huber, G. A. & Kim, S. *Weighted-ensemble Brownian dynamics simulations for
+  protein association reactions.* Biophys. J. **70**, 97–110 (1996). (WE split/merge.)
+- Zwier, M. C. et al. *WESTPA: An interoperable, highly scalable software package
+  for weighted ensemble simulation and analysis.* J. Chem. Theory Comput. **11**,
+  800–809 (2015).
+- Russo, J. D. et al. *WESTPA 2.0: High-performance upgrades for weighted ensemble
+  simulations and analysis.* J. Chem. Theory Comput. **18**, 6494–6509 (2022).
+- Hill, T. L. *Free Energy Transduction and Biochemical Cycle Kinetics.*
+  Springer (1989). (Steady-state flux / MFPT = 1/flux.)
+
 ## Dimensionality reduction / collective variables
 
 - Pérez-Hernández, G. et al. *Identification of slow molecular order parameters
@@ -21,6 +33,12 @@ ones alongside Trails-MD (see [`CITATION.cff`](https://github.com/TeamSuman/Trai
   J. Chem. Theory Comput. **9**, 2000–2009 (2013). (TICA.)
 - Bonati, L., Piccini, G. & Parrinello, M. *Deep learning the slow modes for rare
   events sampling (Deep-TICA).* PNAS **118**, e2113533118 (2021).
+- Bonati, L., Rizzi, V. & Parrinello, M. *Data-driven collective variables for
+  enhanced sampling (Deep-LDA).* J. Phys. Chem. Lett. **11**, 2998–3004 (2020).
+- Mardt, A. et al. *VAMPnets for deep learning of molecular kinetics.* Nat.
+  Commun. **9**, 5 (2018).
+- Wang, D. & Tiwary, P. *State predictive information bottleneck (SPIB).* J. Chem.
+  Phys. **154**, 134111 (2021).
 - Time-lagged (variational) autoencoders: Wehmeyer, C. & Noé, F. *Time-lagged
   autoencoders.* J. Chem. Phys. **148**, 241703 (2018).
 

@@ -4,13 +4,16 @@ All notable changes to Trails-MD are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0] — 2026-07-23
 
-This cycle turns Trails-MD from a coverage-driven adaptive sampler into an
-**MSM-convergence-driven** framework, hardens the engineering foundation, and
-adds first-class **HPC scalability** and **VAMP-2 feature optimisation**. It also
-adds a flux-weighted **transition-matrix convergence** gate with
-**uncertainty-guided spawning**, and opt-in **landscape-adaptive binning**.
+**First public release.** It brings a coverage-driven adaptive sampler up to an
+**MSM-convergence-driven** framework with a rigorous **weighted-ensemble kinetics
+mode** (velocity inheritance + source→sink recycling → an unbiased `MFPT = 1/flux`),
+hardens the engineering foundation, and adds first-class **HPC scalability** and
+**VAMP-2 feature optimisation**. It also adds a flux-weighted **transition-matrix
+convergence** gate with **uncertainty-guided spawning**, and opt-in
+**landscape-adaptive binning**. (Everything below — including the earlier internal
+baseline — is part of this first public release.)
 
 ### Correctness review & HPC feature-test expansion (this pass)
 
@@ -42,7 +45,7 @@ Fixes from a fresh scientific/HPC review, plus a broadened HPC validation suite.
 - **HPC test suite:** expanded from OpenMM+fixed+density to a broad feature matrix
   (engines, spawners, learned CVs, MSM, feature selection, adaptive binning,
   resume, path reconstruction) with a **local-backend mirror** runner
-  (`hpc_tests/run_local_matrix.sh`) so features can be validated off-cluster,
+  (`hpc_tests/run_local_matrix.py`) so features can be validated off-cluster,
   feature-aware result validators, and a `RUNBOOK.md`.
 - **Docs:** corrected `docs/cli.md` (`--log-level` default `WARNING`, `--config`
   default, `--ignore-missing-history`, `trails-md-path` batch flags) and stale
@@ -120,7 +123,23 @@ Fixes and features focused on large-scale atomistic MD on CPU/GPU HPC clusters
   keeps microstate IDs comparable across iterations.
 - **Weighted-ensemble resampling** — a real `WeightedEnsemble` split/merge core
   (Huber & Kim, weight-conserving) and `WESpawner` (`spawn_scheme: we`,
-  `we_target_per_bin`), replacing the former placeholder.
+  `we_target_per_bin`), replacing the former placeholder. CPU is allocated
+  bin-balanced (not weight-proportional), the binner is re-fitted to the live
+  ensemble each iteration, and weight conservation is an asserted invariant.
+- **Kinetics mode** — velocity inheritance (`spawning.inherit_velocities`,
+  OpenMM-only) continues a parent's unperturbed dynamics instead of resampling,
+  so weighted ensemble resamples true dynamics for an unbiased rate.
+- **Source→sink recycling** — `spawning.recycle_target` + `recycle_basis_index`
+  drive a non-equilibrium steady state; the recycled weight per τ is the
+  probability flux, giving `MFPT = 1/flux` (the Hill relation, WESTPA-comparable).
+  See `docs/modes.md`.
+- **MFPT reporting** — `trails-md-analyze` now reports the weighted-ensemble rate
+  (MFPT, τ, flux-plateau convergence diagnostic) and writes a flux/running-MFPT
+  convergence plot; the running estimate is also logged each iteration during a
+  kinetics run. Shared estimator `trails_md.spawners.we.steady_state_mfpt`.
+- **Persistent workers** — `execution.persistent_workers` (local backend) keeps
+  worker processes and warm OpenMM `Context`s alive across iterations, a large
+  speed-up for short segments where per-walker startup would otherwise dominate.
 - `MSMConfig` — all MSM behaviour is **opt-in** (`msm.enabled: false` by
   default), so existing configs are unaffected.
 - Per-iteration MSM results are written to the run directory and checkpointed
@@ -239,7 +258,7 @@ Fixes and features focused on large-scale atomistic MD on CPU/GPU HPC clusters
   over-broad exception handler.
 - Removed the dead `WEResampler` stub.
 
-## [2.0.0] — baseline
+### Baseline framework (initial foundation, folded into 1.0.0)
 
 Modular adaptive sampling framework: OpenMM / GROMACS / Amber engines, fixed or
 learned (TICA / TVAE / PCA / deep-TICA) CV spaces, density / Voronoi / LOF / FPS

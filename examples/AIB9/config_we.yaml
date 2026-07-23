@@ -1,4 +1,7 @@
-# Weighted-ensemble (WE) resampling spawner on AIB9 (fixed phi/psi CVs).
+# Weighted-ensemble (WE) resampling spawner on AIB9 (learned TICA CV on pairwise
+# distances). Exploration mode: velocities are resampled, so this run maps coverage
+# but does NOT produce a rate. For an unbiased MFPT, use kinetics mode
+# (inherit_velocities: true + recycle_target) -- see docs/modes.md.
 system:
   conf_file: aib9_equilibrated.pdb
   top_file: aib9_equilibrated.pdb

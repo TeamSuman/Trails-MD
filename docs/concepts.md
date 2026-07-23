@@ -1,5 +1,20 @@
 # Concepts
 
+## Two modes: exploration vs. kinetics
+
+TRAILS-MD runs in one of two modes, and choosing the right one matters more than any
+other setting:
+
+- **Exploration mode** (default) — walkers respawn with *fresh* velocities, fanning out
+  across configuration space to discover states and pathways fast. The data is excellent
+  for coverage and lineage but **biased for rates**.
+- **Kinetics mode** — walkers *inherit* their parent's velocities (`inherit_velocities:
+  true`) so weighted ensemble resamples unperturbed dynamics; paired with source→sink
+  recycling (`recycle_target`) it yields an unbiased mean-first-passage time via the Hill
+  relation (`MFPT = 1/flux`).
+
+Decide this first. See [Exploration vs. kinetics](modes.md) for the full comparison.
+
 ## Walkers, iterations, and spawning
 
 Each **iteration** runs a batch of short MD **walkers**. Saved frames are
@@ -12,7 +27,7 @@ the next iteration's walkers from. Spawners:
 | `voronoi` | Restart from sparse Voronoi (k-means) cells; scales better than a grid in higher-dimensional CV spaces. |
 | `lof` | Restart from statistical outliers (local outlier factor). |
 | `fps` | Farthest-point sampling for maximal coverage. |
-| `we` | Weighted-ensemble split/merge resampling, **conserving total statistical weight** (`we_target_per_bin`). Note that the default MB velocity resampling breaks exact trajectory continuity — disable it, or use a dedicated WE package, if you need formal WE rate guarantees. |
+| `we` | Weighted-ensemble split/merge resampling with **exact weight conservation** (split → `w/c`, merge sums, `sum(w) = 1` every iteration). CPU is allocated **bin-balanced, never weight-proportional**, and the binner is re-fitted to the **live** walker ensemble each iteration (not the cumulative history) so a frontier bin always holds a walker to replicate. `we_target_per_bin` sets walkers per bin. In the default exploration mode velocities are resampled, so a WE run is great for coverage but not a rate; for an unbiased rate/MFPT, use **kinetics mode** (`inherit_velocities: true` + source→sink `recycle_target`) — see [Exploration vs. kinetics](modes.md). |
 | `msm` | MSM-guided spawning (needs `msm.enabled`): least-counts × slow-mode leverage × outflow uncertainty (`msm.spawn_alpha`, `spawn_leverage`, `spawn_uncertainty`). Targets the states whose sampling most improves the *kinetic model*, not merely the geometrically sparse ones. |
 
 Any spawner can also be pointed toward a target region of the CV space
@@ -43,8 +58,14 @@ grid/Voronoi bin occupancy plateaus (`resolution_check_patience`,
 can rotate, shift, or scale, bin boundaries are recalculated in the newly
 projected space whenever the model retrains.
 
+Convergence can also be judged on the *kinetic model* when `msm.enabled` is set: the
+`ConvergenceMonitor` stops on implied-timescale, VAMP-2, stationary-distribution, and
+statistical-error criteria — see [MSM & kinetic seeding](msm.md) and
+[Analysis](analysis.md).
+
 After a campaign, representative structures can seed longer production runs
-for post-hoc MSM construction — see [MSM & kinetic seeding](msm.md).
+for post-hoc MSM construction — see [MSM & kinetic seeding](msm.md). For a rate targeted
+directly during sampling, use kinetics mode instead — see [Exploration vs. kinetics](modes.md).
 
 ## Execution
 

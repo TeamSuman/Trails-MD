@@ -49,15 +49,19 @@ integration dominates startup. This is the simplest knob and often the largest
 gain for method-development workloads. Watch the adaptive trade-off: longer bursts
 decorrelate more but adapt less frequently.
 
-### 1c. Persistent, resident GPU workers (larger effort, biggest scaling win)
-Today each walker is a fresh process (scheduler array element or local subprocess)
-that re-imports, re-parses topology, and re-creates the GPU context every
-iteration. A **persistent worker pool** — long-lived processes that hold a warm
-OpenMM `Context`/`System` and receive `(positions, velocities, steps)` tasks over
-a queue — eliminates per-iteration startup and JIT, and keeps the GPU busy across
-iterations. This is the model mature tools (WESTPA) use and is already on the
-roadmap in [HPC scaling](hpc_scaling.md). Highest value at high walker counts and
-short bursts.
+### 1c. Persistent, resident workers (implemented for the local backend)
+By default each walker is a fresh process (scheduler array element or local
+subprocess) that re-imports, re-parses topology, and re-creates the OpenMM context
+every iteration. A **persistent worker pool** — long-lived processes that hold a warm
+OpenMM `Context`/`System` and receive tasks across iterations — eliminates that
+per-iteration startup and JIT.
+
+This is **implemented on the local backend**: set `execution.persistent_workers: true`
+and the process pool and warm OpenMM `Context`s are reused across iterations (OpenMM
+only). It is the single largest win for the short-segment, small-system regime adaptive
+sampling favours (per-walker startup can otherwise dominate wall time). The remaining
+work is to extend the same model to the **scheduler/multi-node** backends (the WESTPA-style
+streaming pool) — see [HPC scaling](hpc_scaling.md).
 
 ### 1d. Engine GPU-resident settings
 - **OpenMM:** `precision: single` is materially faster than `mixed`/`double` for
@@ -133,7 +137,7 @@ reproduction is required.
 | Reduce per-iteration stat load (3) | low | todo | long campaign iteration `Other` time |
 | Incremental TICA/MSM (4) | medium | todo | `openmm_msm_convergence` `Other` time |
 | Consolidate trajectories to HDF5/Zarr (3) | medium | todo | inode count / campaign |
-| Persistent resident worker pool (1c) | high | roadmap | high-walker-count scaling |
+| Persistent resident worker pool (1c) | high | implemented (local); scheduler backends roadmap | high-walker-count scaling |
 | Overlapped analysis pipeline (4) | high | todo | `Other`/`Runner` overlap |
 
 See [HPC scaling](hpc_scaling.md) for the dispatch model and the persistent-worker

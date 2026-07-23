@@ -16,10 +16,10 @@ A YAML configuration defines the molecular system, MD engine, sampling
 space, spawning rule, and checkpointing options. Each iteration launches
 short unbiased walkers with OpenMM, GROMACS, or Amber, extracts features
 from the resulting frames, projects them into a fixed or learned CV space,
-and selects new starting frames with a density, Voronoi, local-outlier, or
-farthest-point spawner. Selected frames become the starting structures for
-the next batch of walkers, and the cycle repeats until convergence or a
-maximum iteration count.
+and selects new starting frames with a density, Voronoi, local-outlier,
+farthest-point, MSM-guided, or weighted-ensemble spawner. Selected frames become
+the starting structures for the next batch of walkers, and the cycle repeats until
+convergence or a maximum iteration count.
 
 ## CLN025 (chignolin) folding
 

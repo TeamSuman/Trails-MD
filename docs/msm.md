@@ -1,8 +1,17 @@
 # MSM & kinetic seeding
 
-Trails-MD separates **adaptive exploration** from **kinetic estimation**. Walkers are
-short, and their velocities are redrawn from a Maxwell–Boltzmann (MB) distribution at
-each spawn point.
+Trails-MD separates **adaptive exploration** from **kinetic estimation**. In
+**exploration mode** (the default, and the subject of this page) walkers are short and
+their velocities are redrawn from a Maxwell–Boltzmann (MB) distribution at each spawn
+point. Everything below — including the lag/segment-length trap — is a property of that
+exploration data.
+
+!!! tip "Kinetics mode takes a different route to a rate"
+    If you want a rate *without* building an MSM, use [kinetics mode](modes.md): walkers
+    inherit their parent's velocities and a source→sink recycling box gives `MFPT = 1/flux`
+    (the Hill relation). That steady-state estimator involves **no lag time**, so it is
+    immune to the trap described below. This page is about the other route — an MSM built
+    from exploration trajectories.
 
 ## What velocity resampling does and does not do
 
@@ -42,8 +51,10 @@ each spawn point.
     the shortest walker segment**, and warns. If you need a longer lag, increase
     `spawning.step` so that segments get longer.
 
-For quantitative kinetics on slow processes, prefer the two-stage strategy below (or seed
-longer unbiased runs and reweight with TRAM/dTRAM).
+For quantitative kinetics on slow processes you have three options: the two-stage strategy
+below; seeding longer unbiased runs and reweighting with TRAM/dTRAM; or bypassing the MSM
+entirely with [weighted-ensemble kinetics mode](modes.md), whose lag-free steady-state flux
+estimator is immune to the trap above.
 
 ## The two-stage strategy
 

@@ -28,10 +28,11 @@ engine:
   dt: 0.002                     # ps
   npt: false                    # constant-pressure ensemble
   equilibrate: false
+  # seed: 12345                 # deterministic engine RNG seed (else derived from random_seed)
   # gpu_ids: [0, 1]             # explicit GPUs for the local backend
   # --- GROMACS-only ---
   # gromacs_executable: gmx
-  # gromacs_include_dir: /path/to/gromacs/top
+  # gromacs_include_dir: /path/to/gromacs/top   # also needed when OpenMM reads a GROMACS .top with force-field includes
   # --- Amber-only ---
   # amber_executable: pmemd.cuda
   # amber_input_file: prod.in
@@ -49,13 +50,18 @@ spawning:
   voronoi_clusters: 150         # cells / microstates (voronoi & msm spawners)
   we_target_per_bin: 4          # walkers per bin for spawn_scheme: we
   lof_neighbors: 20
+  # ---- Kinetics mode (rate / MFPT): spawn_scheme: we + md_engine: openmm --------
+  # inherit_velocities: true                   # continue parent velocities (required for a rate)
+  # recycle_target: [[-2.5, -1.0], [2.0, 3.0]] # source->sink sink box, one [lo, hi] per CV dim
+  # recycle_basis_index: 0                      # source frame walkers restart from
+  # See docs/modes.md for how to read MFPT = 1/flux off the run.
   # Coverage-based (legacy) convergence; superseded by msm.* when msm.enabled:
   resolution_check_patience: 5
   convergence_patience: 0
 
 # ---- CV space: fixed physical CVs or a learned latent space ----------------
 # space_mode: fixed | pca | tica | tvae | vampnet | spib | deep-tica | deep-lda
-space_mode: vampnet
+space_mode: tica
 adaptive_feature_type: distances        # distances | fitted_coords | phi_psi (AIB9-only)
 # adaptive_angle_encoding: sincos       # raw | sincos — for phi_psi features, embed
                                         # dihedrals as [sin, cos] so they aren't torn at ±pi
@@ -128,7 +134,9 @@ binning:
 execution:
   backend: local                        # local | slurm | pbs
   # walker_timeout: 3600                 # local: kill a walker after N seconds (hang guard)
+  # persistent_workers: true             # local: reuse workers + warm OpenMM Contexts across iterations (big speed-up for short segments)
   # --- scheduler settings (slurm/pbs) ---
+  # gres: "gpu:1"                        # first-class SLURM --gres (preferred over a raw extra_directive)
   # partition: gpu
   # account: my_alloc
   # walltime: "02:00:00"

@@ -34,6 +34,11 @@ n_bins: [30, 30]       # number of bins per CV axis (target count for adaptive s
 - **Weighted ensemble:** the `we` spawner carries per-frame statistical weights
   (not per-bin), so re-binning every iteration needs no weight remapping — the
   adaptive bins simply change which bin each frame falls in.
+- **Live-ensemble binning (`we`):** the binner is re-fitted to the **current live
+  walker endpoints** each iteration, not to the cumulative history. This is
+  load-bearing for MAB especially — a frontier bin fitted to history could hold no
+  live walker and get no slots, so nothing would be replicated across the barrier.
+  Binning the live ensemble keeps the frontier occupied, matching WESTPA/MAB.
 - **Resolution:** the configured `n_bins` is the per-axis target count; the global
   occupancy-driven resolution bump still applies and propagates to the adaptive
   binner.

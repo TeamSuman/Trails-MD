@@ -23,9 +23,12 @@ under `examples/AlaD/` and `examples/AIB9/`.
 
 ## Structure
 
-The file has one block per concern. Only `system` (and `project_file` for
-`space_mode: fixed`) is mandatory; everything else has sensible defaults, and
-the advanced blocks (`execution`, `adaptive_model`) are **opt-in**.
+The file has one block per concern. The `system`, `engine`, and `spawning` blocks
+are **required** — each may be minimal (their fields all have defaults), but the block
+must be present, or the run fails at load with a "field required" error. `msm`,
+`binning`, `execution`, `feature_selection`, and `adaptive_model` are optional/opt-in
+with sensible defaults. (The starter file from `trails-md-init` includes all of them,
+so you only edit what you need.)
 
 | Block | Selects |
 | --- | --- |
@@ -64,13 +67,13 @@ stops early when grid/Voronoi bin occupancy plateaus. See
 ```
 
 !!! note
-    The snippet above is the exact file `trails-md-init` writes, and includes
-    every field the underlying config schema accepts — including some
-    advanced, opt-in blocks (e.g. input-feature selection, in-loop MSM
-    convergence, adaptive binning) that are not yet covered by the current
-    manuscript scope and aren't otherwise documented on this site. The
-    [Configuration reference](configuration.md) lists the manuscript-scope
-    keys, defaults, and allowed values in table form.
+    The snippet above is the exact file `trails-md-init` writes. It covers the
+    common and representative fields — including some advanced, opt-in blocks
+    (e.g. input-feature selection, in-loop MSM convergence, adaptive binning) — but
+    not literally every schema field (kinetics-mode and some engine tuning options
+    are set by hand; see below). The [Configuration reference](configuration.md)
+    lists the keys, defaults, and allowed values in table form, and
+    [Exploration vs. kinetics](modes.md) covers the rate-mode options.
 
 ## How settings flow
 
@@ -78,4 +81,3 @@ stops early when grid/Voronoi bin occupancy plateaus. See
 schema (`trails_md/config.py`), resolves relative paths, and runs the adaptive
 loop. Invalid values (e.g. an unknown `space_mode` or `spawn_scheme`) are
 rejected immediately with a clear message, before any MD is launched.
-```

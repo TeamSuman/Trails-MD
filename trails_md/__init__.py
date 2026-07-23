@@ -4,7 +4,7 @@ Trails-MD Adaptive Sampling Framework
 A modular, extensible, and scalable framework for enhanced molecular dynamics sampling.
 """
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"
 __all__ = ["TrailsMDConfig", "TrailsMDCore"]
 
 

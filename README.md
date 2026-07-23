@@ -16,7 +16,9 @@ rewriting the whole pipeline.
 - **Fixed or learned sampling spaces** — user-defined physical CVs, PCA, TICA,
   TVAE, and Deep-TICA, swappable at configuration time.
 - **Interchangeable spawning policies** — density, Voronoi, local-outlier-factor,
-  and farthest-point selection.
+  farthest-point, MSM-guided, and weighted-ensemble selection.
+- **Two modes** — exploration (discover states and pathways) and kinetics (an
+  unbiased weighted-ensemble rate via velocity inheritance + source→sink recycling).
 - **Lineage-aware exploration** — every spawned frame stores its parent–child
   ancestry, so connected transition pathways can be reconstructed from otherwise
   disjoint exploration stages.
@@ -67,13 +69,16 @@ trails_md/
   engines/                  OpenMM, GROMACS, and Amber backends
   spaces/                   Feature extraction and adaptive latent spaces
   spawners/                 Density, Voronoi, LOF, FPS, WE, and MSM spawning
-  binning/                  Regular-grid and Voronoi binning utilities
+  binning/                  Regular-grid, Voronoi, adaptive (gradient/MAB/
+                            eigenvector), and weighted-ensemble split/merge
+  msm/                      In-loop MSM estimation and convergence monitoring
   checkpoints/              Checkpoint save/load logic
   paths.py, path_cli.py     Lineage-aware path reconstruction
   logs.py, log_cli.py       Run-log generation utilities
 
 examples/
-  AlaD/                     Alanine dipeptide fixed phi/psi examples
+  alanine_dipeptide/        Self-contained CPU hello-world (OpenMM, no GPU/GROMACS)
+  AlaD/                     Alanine dipeptide GROMACS-topology examples
   AIB9/                     AIB9 fixed and learned CV examples
 
 ```
@@ -102,46 +107,53 @@ backends:
 
 ## Quick Start
 
+The `examples/alanine_dipeptide/` config is a self-contained, CPU-only hello-world:
+it builds its OpenMM system from bundled files and needs no GPU and no external
+force-field paths. (The `examples/AlaD/` configs are richer but use a GROMACS topology,
+so they require GROMACS installed and `engine.gromacs_include_dir` set — see
+[the tutorial](docs/tutorials/alad.md).)
+
 Validate a configuration before running MD:
 
 ```bash
-trails-md --config examples/AlaD/config.yaml --check
+trails-md --config examples/alanine_dipeptide/config.yaml --check
 ```
 
 Run an adaptive campaign:
 
 ```bash
-trails-md --config examples/AlaD/config.yaml --iterations 20
+trails-md --config examples/alanine_dipeptide/config.yaml --iterations 20
 ```
 
 Resume from the latest checkpoint:
 
 ```bash
-trails-md --config examples/AlaD/config.yaml --resume --iterations 20
+trails-md --config examples/alanine_dipeptide/config.yaml --resume --iterations 20
 ```
 
 Resume from a specific checkpoint:
 
 ```bash
-trails-md --config examples/AlaD/config.yaml --resume 10 --iterations 20
+trails-md --config examples/alanine_dipeptide/config.yaml --resume 10 --iterations 20
 ```
 
 Generate a post-hoc exploration log for a completed run:
 
 ```bash
 trails-md-log \
-  --run-dir examples/AlaD/runs/alad_phi_psi_density \
-  --config examples/AlaD/config.yaml
+  --run-dir examples/alanine_dipeptide/runs/alanine_dipeptide_hello \
+  --config examples/alanine_dipeptide/config.yaml
 ```
 
-Reconstruct a connected lineage path between two CV-space points:
+Reconstruct a connected lineage path between two CV-space points (phi/psi in radians;
+adjust the endpoints to two basins your run actually sampled):
 
 ```bash
 trails-md-path \
-  --run-dir examples/AlaD/runs/alad_phi_psi_density \
-  --topology examples/AlaD/start.gro \
-  --start=-1.05,-0.70 \
-  --end=1.05,0.70 \
+  --run-dir examples/alanine_dipeptide/runs/alanine_dipeptide_hello \
+  --topology examples/alanine_dipeptide/structure.pdb \
+  --start=-1.4,2.6 \
+  --end=-1.4,-0.7 \
   --output alad_path.xtc
 ```
 
@@ -263,15 +275,19 @@ updated latent space before spawning, so selection always reflects the current
 coordinates. Optional methods raise a clear, actionable error if their backend
 is missing.
 
-## Post-Processing and Kinetic Seeding
+## Rates and Kinetic Seeding
 
-Trails-MD separates adaptive exploration from kinetic estimation. Walkers are
-short and their velocities are redrawn from a Maxwell–Boltzmann distribution at
-each spawn point, so the adaptive trajectories are intended for exploration
-rather than as an unbiased kinetic ensemble. After a campaign, the explored
-space can be discretized and representative structures selected to seed longer,
-unbiased production trajectories. Those production runs are the appropriate
-input for Markov State Model (MSM) construction and related kinetic analyses.
+Trails-MD runs in one of two modes (see [`docs/modes.md`](docs/modes.md)):
+
+- **Exploration mode** (default). Walkers are short and their velocities are redrawn
+  from a Maxwell–Boltzmann distribution at each spawn point, so the adaptive
+  trajectories are for exploration, not an unbiased kinetic ensemble. To get a rate
+  afterwards, discretize the explored space, select representative structures to seed
+  longer *unbiased* production runs, and build a Markov State Model (MSM) from those.
+- **Kinetics mode.** With `spawn_scheme: we`, `inherit_velocities: true`, and a
+  source→sink `recycle_target`, walkers *inherit* their parent's velocities and
+  weighted ensemble targets an unbiased mean-first-passage time directly during
+  sampling (`MFPT = 1/flux`, the Hill relation) — no separate production stage needed.
 
 ## Typical Workflow
 

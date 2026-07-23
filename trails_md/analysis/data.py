@@ -79,6 +79,61 @@ def load_latest_msm(run_dir: str | Path) -> dict[str, np.ndarray] | None:
     return None
 
 
+def load_run_meta(run_dir: str | Path) -> dict[str, float]:
+    """Parse the ``# key=value`` header of ``output.log`` into a dict.
+
+    Numeric values (``step``, ``dt``, ``walker``, ...) are returned as floats. Used to
+    recover ``tau_ps = step * dt`` for the weighted-ensemble MFPT without re-loading the
+    config. Returns ``{}`` if the log is absent.
+    """
+    log = Path(run_dir) / "output.log"
+    meta: dict[str, float] = {}
+    if not log.exists():
+        return meta
+    for line in log.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("# ") or "=" not in line:
+            continue
+        key, _, value = line[2:].partition("=")
+        try:
+            meta[key.strip()] = float(value.strip())
+        except ValueError:
+            continue  # non-numeric header (outdir, md_engine, ...)
+    return meta
+
+
+def load_flux_history(run_dir: str | Path) -> list[float]:
+    """Recycled-flux series from the latest checkpoint's spawner state.
+
+    Empty unless the run used weighted ensemble with source->sink recycling
+    (kinetics mode). Reads the most recent readable ``checkpoints/iter_*/
+    sampler_state.pkl`` and returns its spawner ``flux_history``.
+    """
+    import pickle
+
+    ckpt_root = Path(run_dir) / "checkpoints"
+    if not ckpt_root.is_dir():
+        return []
+    dirs = sorted(
+        (p for p in ckpt_root.glob("iter_*") if p.name.removeprefix("iter_").isdigit()),
+        key=lambda p: int(p.name.removeprefix("iter_")),
+        reverse=True,
+    )
+    for d in dirs:
+        f = d / "sampler_state.pkl"
+        if not f.exists():
+            continue
+        try:
+            with open(f, "rb") as fh:
+                state = pickle.load(fh)
+        except Exception:
+            continue
+        spawner = (state or {}).get("spawner", {}) if isinstance(state, dict) else {}
+        flux = spawner.get("flux_history") if isinstance(spawner, dict) else None
+        if flux:
+            return [float(x) for x in flux]
+    return []
+
+
 def load_cv_points(run_dir: str | Path) -> np.ndarray:
     """Stack all per-iteration CV projections (``cvs.npz``) into one array."""
     chunks: list[np.ndarray] = []
