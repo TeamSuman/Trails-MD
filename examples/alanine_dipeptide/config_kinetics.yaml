@@ -1,0 +1,55 @@
+# Alanine-dipeptide KINETICS mode: an unbiased C7eq -> alphaR rate (MFPT) from
+# weighted ensemble, self-contained and CPU-only (same 22-atom vacuum system as
+# the hello-world). This demonstrates the two ingredients a rate needs:
+#
+#   1. inherit_velocities: true  -> walkers continue the parent's dynamics
+#   2. recycle_target            -> source->sink recycling, so MFPT = 1/flux (Hill relation)
+#
+# Read the rate after the run with:
+#   trails-md-analyze --run-dir examples/alanine_dipeptide/runs/alanine_dipeptide_kinetics
+# which prints the MFPT + a convergence diagnostic and writes a flux plot (see docs/modes.md).
+# A real converged rate needs many more iterations than a quick smoke test; check the
+# reported "status: converged" / plateau ratio before trusting the number.
+#
+# Validate:  trails-md --config examples/alanine_dipeptide/config_kinetics.yaml --check
+# Run:       trails-md --config examples/alanine_dipeptide/config_kinetics.yaml --iterations 200
+
+system:
+  conf_file: structure.pdb
+  top_file: structure.pdb
+  topology: amber
+  system_file: system.py
+  project_file: project_phi_psi.py    # extract_cvs -> (phi, psi) in radians
+  trajectory_topology_file: structure.pdb
+  feature_selection: "protein and not (type H)"
+
+engine:
+  md_engine: openmm                   # kinetics mode is OpenMM-only
+  platform_name: CPU
+  temperature: 300.0
+  dt: 0.002
+  npt: false
+
+spawning:
+  spawn_scheme: we                    # weighted ensemble (the kinetics-mode spawner)
+  we_target_per_bin: 4
+  search_mode: explore
+  walker: 16
+  step: 1000                          # tau = 2 ps per walker (tau_ps = step * dt)
+  stride: 500                         # WE needs only endpoints; few stored frames
+  max_workers: 4
+  inherit_velocities: true            # (1) continue dynamics -- required for a rate
+  # (2) source->sink recycling. Sink = alphaR basin (phi/psi in radians); one [lo, hi]
+  # per CV dimension. A walker entering the box is recycled to the basis (source) frame.
+  recycle_target: [[-2.4, -0.5], [-1.75, 0.35]]
+  recycle_basis_index: 0              # frame 0 (equilibrated C7eq) is the source
+
+space_mode: fixed
+n_bins: [12, 12]
+min_values: [-3.141592653589793, -3.141592653589793]
+max_values: [3.141592653589793, 3.141592653589793]
+
+outdir: runs/alanine_dipeptide_kinetics
+random_seed: 2024
+checkpoint_freq: 10
+save_features: false

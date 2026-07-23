@@ -13,6 +13,7 @@ trails-md --config examples/<path>/config.yaml --check
 | Example | Demonstrates | Requirements |
 | --- | --- | --- |
 | [`alanine_dipeptide/config.yaml`](alanine_dipeptide/) | **Hello world** — fixed phi/psi CVs, density spawning, the full adaptive loop end-to-end | CPU only; vacuum Amber14 system, **no external force-field files**. Runs in minutes. |
+| [`alanine_dipeptide/config_kinetics.yaml`](alanine_dipeptide/) | **Kinetics mode** — weighted ensemble + velocity inheritance + source→sink recycling for an unbiased C7eq→αR rate (`MFPT = 1/flux`) | CPU only; same self-contained system. See [`docs/modes.md`](../docs/modes.md). |
 
 The alanine-dipeptide system (`system.xml`) is built from the bundled 22-atom
 `structure.pdb` (the canonical OpenMM test structure, MIT) by

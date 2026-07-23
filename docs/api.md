@@ -21,6 +21,12 @@ referee is most likely to call directly; the full package has more.
 
 ::: trails_md.binning.adaptive
 
+## Weighted ensemble & kinetics
+
+::: trails_md.spawners.we
+
+::: trails_md.binning.we
+
 ## Analysis & plotting
 
 ::: trails_md.analysis.data

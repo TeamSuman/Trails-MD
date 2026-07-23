@@ -10,7 +10,7 @@ from informative regions, and repeats the cycle.
 - **Engine-agnostic walkers.** OpenMM, GROMACS, and Amber share the same
   adaptive loop.
 - **Fixed or learned sampling spaces.** User-defined physical CVs, PCA, TICA,
-  TVAE, Deep-TICA, VAMPnet, SPIB, and the supervised Deep-LDA / Deep-TDA
+  TVAE, Deep-TICA, VAMPnet, SPIB, and the supervised Deep-LDA
   coordinates — all swappable with one keyword. See
   [Collective variables](cv_methods.md).
 - **VAMP-2 feature selection.** Reduce thousands of candidate distances to the

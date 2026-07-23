@@ -13,7 +13,20 @@ conda activate trails-md
 cd examples/AlaD
 ```
 
-This example uses OpenMM and needs no extra optional dependencies.
+This example runs on OpenMM but reads a **GROMACS topology** (`topol.top`, which
+`#include`s the `amber99sb` force field). So even though `md_engine: openmm`, you
+must have GROMACS installed and point OpenMM at its force-field directory:
+
+```yaml
+engine:
+  md_engine: openmm
+  gromacs_include_dir: /path/to/gromacs/share/gromacs/top   # required to resolve the .ff includes
+```
+
+Without a valid `gromacs_include_dir`, `--check` still passes (it only validates the
+include dir for `md_engine: gromacs`), but `--iterations` fails at runtime when OpenMM
+cannot resolve the `#include`s. If you just want a self-contained CPU run with no
+GROMACS dependency, use `examples/alanine_dipeptide/` instead.
 
 ## 2. Inspect the configuration
 

@@ -58,3 +58,31 @@ plots.plot_convergence_report("runs/my_run", outfile="report.png")
   [ConvergenceMonitor](msm.md) uses to stop automatically.
 - The **free-energy surface** reveals basins and barriers in the CV space; the
   **MSM network** summarises metastable states and their connectivity.
+
+## Weighted-ensemble kinetics (rate / MFPT)
+
+If you ran in [kinetics mode](modes.md) (`spawn_scheme: we` with `inherit_velocities:
+true` and a `recycle_target`), the rate is read from the recycled-flux series, not from
+an MSM. `trails-md-analyze` reports it and writes a convergence plot:
+
+```bash
+trails-md-analyze --run-dir runs/my_kinetics_run
+# -> MFPT estimate, tau, plateau ratio, converged/not, and
+#    runs/my_kinetics_run/analysis/flux_convergence.png
+```
+
+τ (`step * dt`) is auto-detected from the run log; use `--tau-ps` / `--config` if
+needed and `--discard-fraction` to change the transient cut. The **status / plateau
+ratio** is the key check — a still-decaying or still-rising flux means the steady state
+has not been reached and the run needs more iterations. (If a run has both a recycled
+flux series and `msm.npz`, both reports are produced.)
+
+Programmatic equivalents:
+
+```python
+from trails_md.analysis.data import load_flux_history
+from trails_md.spawners.we import steady_state_mfpt
+
+flux = load_flux_history("runs/my_kinetics_run")
+r = steady_state_mfpt(flux, tau_ps=step * dt)     # r.mfpt_ns, r.plateau_ratio, r.converged
+```

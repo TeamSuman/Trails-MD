@@ -35,19 +35,24 @@ trails-md-init [-o OUTPUT] [--force]
 
 ## `trails-md-analyze`
 
-Produce a multi-panel MSM convergence report from a run directory. Requires
-`iter_*/msm.npz`, which is only written when the run's config opts in to the
-(experimental, not yet manuscript-scope) in-loop MSM feature.
+Report whichever analysis the run supports: the **weighted-ensemble MFPT** (a
+[kinetics-mode](modes.md) `recycle_target` run) and/or the **MSM convergence report**
+(an `msm.enabled` run). The MFPT report prints the rate + a convergence diagnostic and
+writes `analysis/flux_convergence.png`; the MSM report writes the multi-panel figure.
 
 ```bash
-trails-md-analyze --run-dir RUN_DIR [--outfile FILE] [--temperature K]
+trails-md-analyze --run-dir RUN_DIR [--outfile FILE] [--temperature K] \
+                  [--config CONFIG] [--tau-ps PS] [--discard-fraction F]
 ```
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--run-dir` | *(required)* | Run output directory (contains `iter_*/msm.npz`). |
-| `--outfile` | — | Output image path for the report. |
-| `--temperature` | `300.0` | Temperature (K) for free-energy conversion. |
+| `--run-dir` | *(required)* | Run output directory. |
+| `--outfile` | `<run-dir>/analysis/convergence_report.png` | Output path for the **MSM** report. |
+| `--temperature` | `300.0` | Temperature (K) for free-energy conversion (MSM report). |
+| `--config` | `None` | Run config, used to recover τ = `step * dt` for the MFPT if the run log is unavailable. |
+| `--tau-ps` | `None` | Walker segment length in ps (= `step * dt`); overrides auto-detection. |
+| `--discard-fraction` | `0.5` | Leading fraction of the flux series dropped as pre-steady-state transient. |
 
 ## `trails-md-log`
 

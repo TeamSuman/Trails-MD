@@ -45,9 +45,12 @@ state labels.
 - **Nonlinear CVs:** `tvae` or `deep-tica` when a good linear projection isn't
   enough to separate conformations that overlap in physical coordinates.
 - **Kinetically meaningful states:** `vampnet` (soft metastable assignment) or `spib`.
-- **You know the endpoints:** `deep-lda` / Deep-TDA — but note that endpoint
+- **You know the endpoints:** `deep-lda` — but note that endpoint
   *separation* is not the same as having sampled a *pathway* between them; check the
   lineage (see [Concepts](concepts.md)).
+- **Pairs with kinetics mode:** a learned slow coordinate (`tica`/`deep-tica`) makes a
+  natural progress coordinate for a weighted-ensemble rate — see
+  [Exploration vs. kinetics](modes.md).
 - Whatever you pick, **validate against an interpretable observable** for your system.
 
 ## Configuring
