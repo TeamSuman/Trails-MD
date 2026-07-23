@@ -106,8 +106,10 @@ def test_seed_manager_is_deterministic():
 
 def test_feature_memory_pruning_bounds_growth():
     import types
-    import numpy as np
     from unittest.mock import MagicMock
+
+    import numpy as np
+
     from trails_md.core import TrailsMDCore
 
     # Create a dummy TrailsMD instance with mocks

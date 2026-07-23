@@ -85,6 +85,22 @@ class SpawningConfig(BaseModel):
     voronoi_grid_size: int = 250
     lof_neighbors: int = 20
     we_target_per_bin: int = 4  # weighted-ensemble walkers per occupied bin
+    # Kinetics mode. When True, respawned walkers CONTINUE from their parent's
+    # endpoint velocities instead of redrawing Maxwell-Boltzmann. This turns
+    # weighted ensemble into an unbiased resampling of unperturbed dynamics, so a
+    # rate (MFPT) can be read from the run. Requires spawn_scheme: we (only there
+    # is the ensemble a set of continuable live walkers) and the OpenMM engine.
+    # Default False = exploration mode (independent restarts; fast discovery, no
+    # rate). See the "exploration vs kinetics" section of the docs.
+    inherit_velocities: bool = False
+    # Source->sink recycling (steady-state rate mode). `recycle_target` is a CV-space
+    # box [[lo, hi], ...] per dimension: a walker landing inside it is terminated and
+    # its weight restarted from `recycle_basis_index` (a frame index; 0 = the initial
+    # structure). This drives a non-equilibrium steady state whose flux into the
+    # target gives MFPT = 1/flux (Hill relation) -- the same estimator WESTPA uses,
+    # which is what makes the two directly comparable. Requires spawn_scheme: we.
+    recycle_target: list[list[float]] | None = None
+    recycle_basis_index: int = 0
     resolution_check_patience: int = 5
     resolution_max_bins: int = 150
     voronoi_max_clusters: int = 5000
@@ -279,6 +295,13 @@ class ExecutionConfig(BaseModel):
     # longer than this many seconds. None disables the timeout (default). Guards
     # against a hung in-process OpenMM walker stalling the campaign forever.
     walker_timeout: float | None = None
+    # Local backend: keep worker processes (and, for OpenMM, warm Contexts) alive
+    # across iterations instead of rebuilding them every walker. Rebuilding the
+    # Context + CUDA JIT is the dominant per-walker cost for short segments, so
+    # this is a large speed-up for the adaptive regime; results are identical
+    # (the engine reseeds + reinitializes). Only OpenMM benefits; subprocess
+    # engines (GROMACS/Amber) run fresh regardless.
+    persistent_workers: bool = False
     # Scheduler resource requests (per array task = one walker).
     partition: str | None = None  # SLURM partition / PBS queue
     account: str | None = None
@@ -422,6 +445,62 @@ class TrailsMDConfig(BaseModel):
         if value not in {"fixed", "vamp_adaptive"}:
             raise ValueError("retrain_policy must be 'fixed' or 'vamp_adaptive'")
         return value
+
+    @model_validator(mode="after")
+    def _recycling_requirements(self):
+        """Recycling drives a source->sink steady state, which only weighted
+        ensemble maintains (it needs conserved weights and a live ensemble)."""
+        if self.spawning.recycle_target is not None:
+            if self.spawning.spawn_scheme != "we":
+                raise ValueError(
+                    "spawning.recycle_target (steady-state rate mode) requires "
+                    "spawn_scheme: we -- recycling only makes sense for a "
+                    "weight-conserving weighted-ensemble run."
+                )
+            for i, box in enumerate(self.spawning.recycle_target):
+                if len(box) != 2 or box[0] >= box[1]:
+                    raise ValueError(
+                        f"spawning.recycle_target[{i}] must be [low, high] with "
+                        f"low < high; got {box}."
+                    )
+            # The sink definition IS the observable: MFPT = 1/flux, and flux is
+            # whatever crosses into this box. A box with fewer dimensions than the CV
+            # space used to be silently truncated to the dimensions given, leaving the
+            # rest UNBOUNDED -- so an unrelated basin that merely shared the specified
+            # coordinate was recycled and booked as flux, and the rate came out too
+            # fast with no warning. Too many dimensions were silently ignored. Neither
+            # is recoverable downstream, so both are hard errors.
+            n_dim = len(self.n_bins)
+            if len(self.spawning.recycle_target) != n_dim:
+                raise ValueError(
+                    f"spawning.recycle_target has "
+                    f"{len(self.spawning.recycle_target)} dimension(s) but the "
+                    f"sampling space has {n_dim} (n_bins={self.n_bins}). The target "
+                    f"must be bounded in EVERY dimension: an unbounded dimension "
+                    f"silently recycles walkers that never reached the target, "
+                    f"inflating the flux and biasing the MFPT fast. Give one "
+                    f"[low, high] box per dimension."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _kinetics_mode_requirements(self):
+        """Velocity inheritance (kinetics mode) is only meaningful, and only
+        implemented, for weighted-ensemble spawning on the OpenMM engine."""
+        if self.spawning.inherit_velocities:
+            if self.spawning.spawn_scheme != "we":
+                raise ValueError(
+                    "spawning.inherit_velocities (kinetics mode) requires "
+                    "spawn_scheme: we -- only weighted ensemble resamples a set of "
+                    "continuable live walkers. Use exploration mode (any spawner, "
+                    "fresh velocities) or switch spawn_scheme to 'we'."
+                )
+            if self.engine.md_engine != "openmm":
+                raise ValueError(
+                    "spawning.inherit_velocities (kinetics mode) is currently "
+                    "implemented only for the OpenMM engine."
+                )
+        return self
 
     @field_validator("checkpoint_freq")
     @classmethod

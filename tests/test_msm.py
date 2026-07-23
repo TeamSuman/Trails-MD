@@ -48,8 +48,14 @@ def test_estimator_recovers_three_states():
 
     assert isinstance(result, MSMResult)
     assert result.n_states_active >= 2
-    # Two slow processes resolved and positive.
-    assert np.all(result.timescales[np.isfinite(result.timescales)] > 0)
+    # Two slow processes resolved and positive. The finite-mask is a filter, not a
+    # check: `np.all([])` is True, so masking alone would pass if EVERY timescale came
+    # back NaN -- i.e. if no process were resolved at all. Require them to exist first.
+    finite = result.timescales[np.isfinite(result.timescales)]
+    assert len(finite) == 2, (
+        f"expected 2 finite timescales, got {len(finite)} of {result.timescales}"
+    )
+    assert np.all(finite > 0)
     # Stationary distribution is a probability vector.
     assert result.stationary_distribution.sum() == pytest.approx(1.0, abs=1e-6)
     # PCCA+ recovered three metastable populations that sum to ~1.

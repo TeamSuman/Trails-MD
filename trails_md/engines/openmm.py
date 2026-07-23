@@ -34,9 +34,36 @@ class OpenMMEngine(MDEngine):
         self.should_equilibrate = equilibrate
         self.gromacs_include_dir = gromacs_include_dir
         self.seed: int | None = kwargs.get("seed", None)
+        # Kinetics mode: persist each walker's endpoint State (positions+velocities+
+        # box) next to its trajectory so the next segment can CONTINUE the dynamics
+        # (velocity inheritance) rather than redraw velocities. Set via engine_kwargs
+        # by the orchestrator when spawning.inherit_velocities is on.
+        self.save_endstate: bool = bool(kwargs.get("save_endstate", False))
 
         self.simulation = None
         self.positions = None
+        # When True, a persistent worker has cached this prepared engine and
+        # re-arms it per walker instead of rebuilding the Context (see
+        # ``_create_simulation`` and ``rearm_for_walker``). Off by default so the
+        # normal one-shot path is completely unchanged.
+        self._warm_reuse = False
+
+    # Persistent-worker support: rebuilding the OpenMM Context (+ CUDA JIT) is the
+    # dominant per-walker cost for short segments. This engine can instead keep a
+    # warm Context alive across walkers and re-arm it, reproducing a fresh build
+    # bit-for-bit (verified on the CPU platform). Subprocess engines (GROMACS,
+    # Amber) gain nothing from this and leave the flag False.
+    supports_warm_reuse = True
+
+    def rearm_for_walker(self, seed: int | None) -> None:
+        """Point an already-prepared, cached engine at the next walker.
+
+        Only the per-walker state changes: the thermostat seed. Re-arming leaves
+        the (JIT-warm) Context in place; ``_create_simulation`` then reseeds the
+        integrator and reinitializes the Context so the run is identical to one
+        started from a fresh build with this seed.
+        """
+        self.seed = seed
 
     @staticmethod
     def _available_platforms() -> list[str]:
@@ -85,7 +112,8 @@ class OpenMMEngine(MDEngine):
                 self.top = self.gro
         elif file_extension == ".xml":
             self.gro = XmlSerializer.deserialize(open(gro_file).read())
-        elif file_extension == ".crd":
+        elif file_extension in {".crd", ".rst7", ".ncrst", ".inpcrd"}:
+            # tleap's `saveamberparm` writes .rst7 by default; accept the whole family.
             self.gro = AmberInpcrdFile(gro_file)
             self.top = AmberPrmtopFile(top_file, periodicBoxVectors=self.gro.boxVectors)
         else:
@@ -136,6 +164,12 @@ class OpenMMEngine(MDEngine):
                 self.top,
                 **accepted_kwargs,
             )
+            # A user's make_system cannot know the per-walker seed, so thread it
+            # here too. Without this the thermostat RNG of a custom-system_file run
+            # is unseeded and walkers are NOT reproducible -- the deterministic-seed
+            # guarantee silently held only for the built-in system path.
+            if self.seed is not None and hasattr(self.integrator, "setRandomNumberSeed"):
+                self.integrator.setRandomNumberSeed(self.seed)
         else:
             self.system = self.top.createSystem(
                 nonbondedMethod=self.nonbondedMethod,
@@ -159,7 +193,29 @@ class OpenMMEngine(MDEngine):
                 barostat.setRandomNumberSeed(self.seed)
             self.system.addForce(barostat)
 
+        # Both construction paths above have produced an integrator by now. This must
+        # stay inside __init__: OpenMM's default is 1e-5, so if it is skipped the run
+        # silently uses a constraint tolerance 10x looser than configured.
         self.integrator.setConstraintTolerance(self.constraintTolerance)
+
+    def _reseed_barostat(self, seed: int) -> bool:
+        """Point every MonteCarloBarostat in the System at ``seed``.
+
+        Returns whether one was found, so a caller can tell "reseeded" from "no
+        barostat present" rather than assuming success.
+        """
+        from openmm import MonteCarloBarostat  # type: ignore
+
+        system = getattr(self, "system", None)
+        if system is None:
+            return False
+        found = False
+        for i in range(system.getNumForces()):
+            force = system.getForce(i)
+            if isinstance(force, MonteCarloBarostat):
+                force.setRandomNumberSeed(int(seed))
+                found = True
+        return found
 
     @staticmethod
     def _cpu_thread_count() -> int | None:
@@ -214,6 +270,28 @@ class OpenMMEngine(MDEngine):
 
     def _create_simulation(self, device_index: int):
         import logging
+
+        # Warm path: a persistent worker has already built this Context on this
+        # device. Re-arm it instead of rebuilding. Reseeding the integrator and
+        # then reinitializing the Context reproduces a fresh build bit-for-bit,
+        # because the thermostat RNG is re-derived from the new seed on
+        # reinitialize (a naive reseed without reinitialize does NOT — verified).
+        if self._warm_reuse and self.simulation is not None:
+            if self.seed is not None:
+                if getattr(self, "integrator", None) is not None:
+                    self.integrator.setRandomNumberSeed(self.seed)
+                # The barostat is a Force, seeded once in prepare() with whichever
+                # walker built this Context. rearm_for_walker() only updates
+                # self.seed, so without this every walker sharing a cached Context
+                # would run the whole campaign on ONE barostat RNG stream -- the cold
+                # path seeds it per walker, so warm and cold would silently disagree
+                # and the "identical to a fresh build" guarantee above would be false.
+                # Same class of defect as the integrator seed that once never reached
+                # make_system: one Force further down.
+                self._reseed_barostat(self.seed)
+            self.simulation.context.reinitialize(preserveState=False)
+            self.simulation.context.setPositions(self.positions)
+            return
 
         platform_props = self._platform_properties(device_index)
         try:
@@ -337,18 +415,29 @@ class OpenMMEngine(MDEngine):
             os.remove(traj_out_str)
 
         start_positions, start_box_vectors = self._split_start_state(start_coords)
+        start_velocities = (
+            start_coords.get("velocities") if isinstance(start_coords, dict) else None
+        )
         if start_positions is not None:
-            # We assume start_coords is a file containing positions or a state that OpenMM can load
-            # This is a simplification; in reality, we need to extract coords from start_coords.
-            # Assuming start_coords is passed as an object containing positions if it's not a Path
-            # Actually, `start_coords` should be positions directly, or we parse it.
-            # For backward compatibility, let's allow it to be the positions directly.
+            # start_coords may be a bare positions array or a dict carrying
+            # positions/box_vectors/velocities. Positions are always set. For
+            # velocities there are two regimes:
+            #   * exploration (default): redraw from Maxwell-Boltzmann — walkers are
+            #     independent restarts, no continuous dynamics implied.
+            #   * kinetics mode (inherited velocities present): CONTINUE the parent
+            #     walker's dynamics by restoring its endpoint velocities, so weighted
+            #     ensemble is an unbiased resampling of unperturbed trajectories and a
+            #     rate may be read from it. Split children share the parent state and
+            #     decorrelate through the Langevin noise.
             if start_box_vectors is not None:
                 self.simulation.context.setPeriodicBoxVectors(*start_box_vectors)
             self.simulation.context.setPositions(start_positions)
-            self.simulation.context.setVelocitiesToTemperature(
-                self.temperature, self.seed if self.seed is not None else 0
-            )
+            if start_velocities is not None:
+                self.simulation.context.setVelocities(start_velocities)
+            else:
+                self.simulation.context.setVelocitiesToTemperature(
+                    self.temperature, self.seed if self.seed is not None else 0
+                )
 
         self.simulation.reporters = [self._trajectory_reporter(traj_out_str, stride)]
 
@@ -358,7 +447,36 @@ class OpenMMEngine(MDEngine):
             self.simulation.step(steps)
             success = True
         except Exception as e:
-            print(f"Production run failed ({e}), attempting reinitialize+recovery...")
+            import logging
+
+            # Recovery redraws velocities and MINIMIZES -- it does not resume the
+            # walker, it replaces it. In kinetics mode that is not a recovery at all:
+            # the walker carries statistical weight, its inherited velocities are the
+            # continuity the WE rate depends on, and a minimized restart is simply
+            # different dynamics. Returning success there would keep the weight, write
+            # the endstate, and let a walker whose trajectory was quietly substituted
+            # contaminate the flux with nothing in the record to find afterwards.
+            # `save_endstate` is set exactly when inherit_velocities is on, so it is
+            # the kinetics-mode marker. Fail the walker instead and let
+            # min_success_fraction decide -- a dropped walker is recoverable, a
+            # silently wrong rate is not.
+            if self.save_endstate:
+                logging.error(
+                    "Walker failed during production (%s). Refusing to recover by "
+                    "minimisation: this is kinetics mode, where recovery would "
+                    "replace the walker's dynamics while keeping its weight and "
+                    "silently bias the flux. Failing the walker instead.",
+                    e,
+                )
+                self.simulation.reporters = []
+                if os.path.exists(traj_out_str):
+                    os.remove(traj_out_str)
+                return False
+            logging.warning(
+                "Production run failed (%s), attempting reinitialize+recovery. "
+                "The recovered segment is a minimised restart, NOT a continuation.",
+                e,
+            )
             self.simulation.reporters = []
             if os.path.exists(traj_out_str):
                 os.remove(traj_out_str)
@@ -387,7 +505,31 @@ class OpenMMEngine(MDEngine):
             self.simulation.step(steps)
             success = True
 
+        if success and self.save_endstate:
+            self._write_endstate(traj_out_str)
         return success
+
+    def _write_endstate(self, traj_out_str: str) -> None:
+        """Persist the walker's endpoint State for velocity-inheriting respawn.
+
+        Written atomically as ``<traj>.endstate.npz`` (positions nm, velocities
+        nm/ps, box nm). This is what lets weighted-ensemble run as a continuous,
+        unbiased resampling: the child of a split walker restarts from exactly this
+        state and decorrelates through the Langevin noise, so a rate is recoverable.
+        """
+        import numpy as np
+        from openmm import unit
+
+        state = self.simulation.context.getState(getPositions=True, getVelocities=True)
+        pos = state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+        vel = state.getVelocities(asNumpy=True).value_in_unit(
+            unit.nanometer / unit.picosecond
+        )
+        box = state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(unit.nanometer)
+        path = f"{traj_out_str}.endstate.npz"
+        tmp = f"{path}.tmp.npz"
+        np.savez(tmp, positions=pos, velocities=vel, box=box)
+        os.replace(tmp, path)
 
     def _trajectory_reporter(self, traj_out: str, stride: int):
         return XTCReporter(traj_out, stride, enforcePeriodicBox=True)

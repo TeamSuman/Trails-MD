@@ -43,6 +43,7 @@ def make_backend(execution_config, *, gpu_ids=None, max_workers: int = 8):
             gpu_ids=gpu_ids,
             max_workers=max_workers,
             walker_timeout=getattr(execution_config, "walker_timeout", None),
+            persistent_workers=getattr(execution_config, "persistent_workers", False),
         )
 
     cfg = execution_config.model_dump()

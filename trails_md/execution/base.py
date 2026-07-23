@@ -99,8 +99,17 @@ def build_walker_tasks(
     return tasks
 
 
-def run_walker_task(task: WalkerTask) -> bool:
-    """Instantiate the engine in-process and run one production walker."""
+def run_walker_task(task: WalkerTask, *, engine_cache: dict | None = None) -> bool:
+    """Instantiate the engine in-process and run one production walker.
+
+    If ``engine_cache`` is provided (persistent-worker mode) and the engine
+    supports warm reuse, a prepared engine is cached under a key that pins it to
+    this exact system *and device*, and re-armed for subsequent walkers instead
+    of being rebuilt. The result is identical to a fresh build (the OpenMM engine
+    reseeds + reinitializes its Context); the only difference is that the
+    expensive Context construction + CUDA JIT is paid once per (system, device)
+    rather than once per walker. Engines that do not support warm reuse
+    (subprocess GROMACS/Amber) always take the fresh path."""
     import warnings
 
     warnings.filterwarnings(
@@ -116,9 +125,54 @@ def run_walker_task(task: WalkerTask) -> bool:
 
         SeedManager(int(walker_seed)).set_seed()
 
+    if engine_cache is not None:
+        cached = _warm_engine(task, engine_cache)
+        if cached is not None:
+            return bool(cached.run_production(**task.run_kwargs()))
+
     engine = EngineFactory.get(task.engine_name, **task.engine_kwargs)
     engine.prepare(**task.prepare_kwargs)
     return bool(engine.run_production(**task.run_kwargs()))
+
+
+def _warm_engine_key(task: WalkerTask) -> tuple:
+    """Cache key for a reusable engine: same system AND same device, seed excluded.
+
+    The seed is per-walker and is re-armed on reuse, so it must NOT be in the key.
+    The device index MUST be, or a walker re-armed on a worker that has since moved
+    to a different GPU would silently run on the original device, breaking per-walker
+    isolation."""
+    def _froze(d: dict) -> tuple:
+        return tuple(sorted((k, repr(v)) for k, v in d.items() if k != "seed"))
+
+    return (
+        task.engine_name,
+        task.device_index,
+        _froze(task.engine_kwargs),
+        _froze(task.prepare_kwargs),
+    )
+
+
+def _warm_engine(task: WalkerTask, cache: dict):
+    """Return a prepared, warm-reusable engine for ``task``, or None to fall back.
+
+    None is returned for engines that do not support warm reuse (subprocess
+    GROMACS/Amber), so the caller runs them via the normal fresh path."""
+    from trails_md.engines.base import EngineFactory
+
+    key = _warm_engine_key(task)
+    engine = cache.get(key)
+    if engine is not None:
+        engine.rearm_for_walker(task.engine_kwargs.get("seed"))
+        return engine
+
+    engine = EngineFactory.get(task.engine_name, **task.engine_kwargs)
+    if not getattr(engine, "supports_warm_reuse", False):
+        return None  # subprocess engine: no warm benefit, use the fresh path
+    engine.prepare(**task.prepare_kwargs)
+    engine._warm_reuse = True
+    cache[key] = engine
+    return engine
 
 
 class ExecutionBackend(ABC):

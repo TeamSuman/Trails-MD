@@ -10,18 +10,32 @@ from informative regions, and repeats the cycle.
 - **Engine-agnostic walkers.** OpenMM, GROMACS, and Amber share the same
   adaptive loop.
 - **Fixed or learned sampling spaces.** User-defined physical CVs, PCA, TICA,
-  TVAE, and Deep-TICA, swappable at configuration time (plus experimental
-  VAMPnet, SPIB, and Deep-LDA — see [Collective variables](cv_methods.md)).
-- **Interchangeable spawning policies.** Density, Voronoi,
-  local-outlier-factor, and farthest-point selection (plus experimental
-  weighted-ensemble and MSM-guided spawning — see [Concepts](concepts.md)).
+  TVAE, Deep-TICA, VAMPnet, SPIB, and the supervised Deep-LDA / Deep-TDA
+  coordinates — all swappable with one keyword. See
+  [Collective variables](cv_methods.md).
+- **VAMP-2 feature selection.** Reduce thousands of candidate distances to the
+  few dozen that actually carry the slow dynamics.
+  See [Feature selection](feature_selection.md).
+- **Six interchangeable spawning policies.** Density, Voronoi,
+  local-outlier-factor, farthest-point, **weight-conserving weighted ensemble**,
+  and **MSM-guided** (least-counts × slow-mode leverage × uncertainty).
+  See [Concepts](concepts.md).
+- **Landscape-adaptive binning.** Uniform, density-gradient, minimal adaptive
+  binning (MAB), and MSM-eigenvector schemes. See [Adaptive binning](binning.md).
+- **In-loop Markov State Models.** Estimate an MSM *inside* the adaptive loop and
+  stop the campaign on **kinetic** convergence — implied timescales, VAMP-2,
+  stationary distribution, transition matrix, or Bayesian statistical error —
+  rather than on bin occupancy alone. See [MSM & kinetic seeding](msm.md).
 - **Lineage-aware exploration.** Every spawned frame stores its parent-child
   ancestry, so connected transition pathways can be reconstructed from
   otherwise disjoint exploration stages.
 - **Restartable campaigns.** Per-iteration checkpoints capture the adaptive
-  model, feature history, sampling state, and walker coordinates.
+  model, feature history, sampling state, and walker coordinates; deterministic
+  seeding means a resumed run reproduces an uninterrupted one.
 - **HPC scalability.** Run on a multi-GPU workstation or dispatch walkers as
-  **SLURM** / **PBS** array jobs (`execution.backend`).
+  **SLURM** / **PBS** array jobs (`execution.backend`), with submit-retry against
+  queue limits, configurable GPU request directives, and per-walker GPU isolation
+  checks. See [Execution](execution.md).
 
 ## The adaptive loop
 

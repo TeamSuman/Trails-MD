@@ -212,6 +212,7 @@ def test_walker_task_device_index_defaults_to_scheduler_sentinel():
 # ── Checkpoint completeness gating ──────────────────────────────────────────
 def test_broken_delta_chain_is_reported_loudly(tmp_path, caplog):
     import logging
+
     import pytest
 
     from trails_md.checkpoints.manager import CheckpointManager

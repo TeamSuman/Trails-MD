@@ -66,6 +66,19 @@ def md_subprocess_timeout() -> float | None:
 class MDEngine(ABC):
     """Abstract Strategy interface for molecular dynamics execution."""
 
+    # Whether a persistent worker may cache a prepared instance of this engine and
+    # re-arm it per walker instead of rebuilding. In-process engines that hold a
+    # reusable context (OpenMM) override this to True; subprocess engines (GROMACS,
+    # Amber) leave it False and always run fresh.
+    supports_warm_reuse = False
+
+    def rearm_for_walker(self, seed: int | None) -> None:
+        """Re-point a cached engine at the next walker (persistent-worker mode).
+
+        Only warm-reusable engines are ever cached, so the base implementation is
+        never called; it exists so the attribute is always present."""
+        raise NotImplementedError
+
     @abstractmethod
     def prepare(self, conf: Path, top: Path, system_file: Path | None = None) -> None:
         """Prepare the MD environment, e.g., setup system, topology, forces."""

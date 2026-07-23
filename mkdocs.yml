@@ -26,30 +26,42 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - Concepts: concepts.md
+  - Exploration vs. kinetics: modes.md
   - The input file: input_file.md
   - Configuration reference: configuration.md
-  - Collective variables: cv_methods.md
-  - MSM & kinetic seeding: msm.md
-  - Execution (workstation & HPC): execution.md
-  - HPC scaling & WESTPA comparison: hpc_scaling.md
-  - Performance & GPU utilization: performance.md
-  - CLI reference: cli.md
-  - References: references.md
+  - Sampling spaces:
+      - Collective variables: cv_methods.md
+      - Feature selection (VAMP-2): feature_selection.md
+      - Adaptive binning: binning.md
+  - Kinetics:
+      - MSM & kinetic seeding: msm.md
+      - Adaptive MSM tutorial: tutorials/adaptive_msm.md
+  - Execution & performance:
+      - Execution (workstation & HPC): execution.md
+      - HPC scaling & WESTPA comparison: hpc_scaling.md
+      - Performance & GPU utilization: performance.md
+  - Analysis: analysis.md
+  - Reference:
+      - CLI reference: cli.md
+      - Python API: api.md
+      - Bibliography: references.md
   - Tutorials:
       - Alanine dipeptide: tutorials/alad.md
       - AIB9: tutorials/aib9.md
+      - Notebook tutorial: notebook_tutorial.md
   - Results in the paper: results_in_paper.md
-
-exclude_docs: |
-  feature_selection.md
-  binning.md
-  api.md
-  notebook_tutorial.md
-  analysis.md
-  tutorials/adaptive_msm.md
 
 plugins:
   - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+            heading_level: 3
+            members_order: source
+            docstring_style: numpy
 
 markdown_extensions:
   - admonition

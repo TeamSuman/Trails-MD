@@ -14,6 +14,7 @@ of the binning implementation and fully unit-testable.
 
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass
 
 import numpy as np
@@ -84,20 +85,31 @@ class WeightedEnsemble:
 
     @staticmethod
     def _merge(members, mweights, target, rng):
-        """Merge the two lowest-weight walkers until ``target`` remain."""
-        while len(members) > target:
-            order = np.argsort(mweights)
-            i, j = int(order[0]), int(order[1])
-            combined = mweights[i] + mweights[j]
-            # Survivor chosen with probability proportional to weight.
-            prob_i = mweights[i] / combined if combined > 0 else 0.5
-            survivor = i if rng.random() < prob_i else j
-            keep_parent = members[survivor]
-            members = [m for k, m in enumerate(members) if k not in (i, j)]
-            mweights = [w for k, w in enumerate(mweights) if k not in (i, j)]
-            members.append(keep_parent)
-            mweights.append(combined)
-        return members, mweights
+        """Merge the two lowest-weight walkers until ``target`` remain.
+
+        Heap-backed: the previous version re-sorted the whole bin and rebuilt
+        two lists on every single merge, which is O(n^2 log n). That is fine for
+        a unit test and hopeless on a real cumulative cloud -- a proline
+        equilibrium bin holding ~176k frames never finished merging at all.
+        Semantics are unchanged (always combine the two lightest; the survivor
+        is drawn with probability proportional to its weight).
+        """
+        if len(members) <= target:
+            return members, mweights
+        # (weight, tiebreak, parent). The counter keeps ordering deterministic
+        # and stops heapq from ever comparing parent ids.
+        heap = [(w, i, m) for i, (m, w) in enumerate(zip(members, mweights, strict=False))]
+        heapq.heapify(heap)
+        counter = len(heap)
+        while len(heap) > target:
+            w_i, _, m_i = heapq.heappop(heap)
+            w_j, _, m_j = heapq.heappop(heap)
+            combined = w_i + w_j
+            prob_i = w_i / combined if combined > 0 else 0.5
+            survivor = m_i if rng.random() < prob_i else m_j
+            heapq.heappush(heap, (combined, counter, survivor))
+            counter += 1
+        return [m for _, _, m in heap], [w for w, _, _ in heap]
 
     @staticmethod
     def _split(members, mweights, target):

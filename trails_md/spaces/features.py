@@ -28,6 +28,9 @@ class FeatureExtractor:
     def __init__(self, topology: str, selection: str | None = None):
         self.topology = topology
         self.selection = selection if selection else "protein and not (type H)"
+        # path -> frame count. Written trajectories are immutable, so this is always
+        # safe and turns an O(iterations) re-read per spawn step into a dict lookup.
+        self._traj_len_cache: dict[str, int] = {}
 
     def extract_pairwise_distances(self, trajectories: list[str]) -> np.ndarray:
         """Calculate pairwise distances for a list of trajectory files."""
@@ -172,9 +175,36 @@ class FeatureExtractor:
         # Combine into (n_frames, 2) shape: [Rg, RMSD]
         return np.column_stack((rg_values, rmsd_values))
 
+    def _trajectory_length(self, path: str) -> int:
+        """Frame count of a written trajectory, cached.
+
+        Mapping a global spawn index to (trajectory, frame) needs each trajectory's
+        length. Reading it back from disk every time is pure waste: a written
+        trajectory is IMMUTABLE, so its frame count can never change. Without the
+        cache this opens every pooled trajectory on every spawn step -- O(iterations)
+        file opens per iteration, hence O(iterations^2) over a run -- which is what
+        made the per-iteration overhead grow without bound (+0.8 s per iteration,
+        unbounded) and put long campaigns out of reach. Exploration spawners
+        (density/FPS/LOF/Voronoi/MSM) genuinely need the history, so they cannot
+        avoid the mapping; they just should not pay for it twice.
+        """
+        cached = self._traj_len_cache.get(path)
+        if cached is not None:
+            return cached
+        if str(path).endswith(".xtc"):
+            from MDAnalysis.coordinates.XTC import XTCReader  # type: ignore
+
+            with XTCReader(path) as reader:
+                length = int(reader.n_frames)
+        else:
+            u_temp = _load_universe(self.topology, path)
+            length = int(u_temp.trajectory.n_frames)
+            u_temp.trajectory.close()
+        self._traj_len_cache[path] = length
+        return length
+
     def extract_positions_by_indices(self, trajectories: list[str], indices: list[int]) -> list:
         """Return full-system OpenMM positions for selected global frame indices."""
-        from MDAnalysis.coordinates.XTC import XTCReader  # type: ignore
         from openmm.unit import nanometer  # type: ignore
 
         # Map global indices to their original order to return them correctly
@@ -194,14 +224,9 @@ class FeatureExtractor:
                     if traj_idx >= len(trajectories):
                         raise IndexError(f"Spawn frame index {target_index} is outside trajectory range.")
 
-                    # Compute length extremely fast without parsing topology
-                    if str(trajectories[traj_idx]).endswith(".xtc"):
-                        with XTCReader(trajectories[traj_idx]) as reader:
-                            traj_length = reader.n_frames
-                    else:
-                        u_temp = _load_universe(self.topology, trajectories[traj_idx])
-                        traj_length = u_temp.trajectory.n_frames
-                        u_temp.trajectory.close()
+                    # Cached: a written trajectory's length never changes, and
+                    # re-reading it here is what made the cost quadratic.
+                    traj_length = self._trajectory_length(trajectories[traj_idx])
 
                     if target_index < current_global_frame + traj_length:
                         # Load topology ONLY for the target trajectory

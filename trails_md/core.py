@@ -83,6 +83,8 @@ class TrailsMDCore:
             grid_size=self.config.spawning.voronoi_grid_size,
             n_neighbors=self.config.spawning.lof_neighbors,
             target_per_bin=self.config.spawning.we_target_per_bin,
+            recycle_target=self.config.spawning.recycle_target,
+            recycle_basis_index=self.config.spawning.recycle_basis_index,
             alpha=self.config.msm.spawn_alpha,
             leverage=self.config.msm.spawn_leverage,
             uncertainty=self.config.msm.spawn_uncertainty,
@@ -114,6 +116,10 @@ class TrailsMDCore:
         # State variables
         self.iteration = 0
         self.history = {}
+        # Structure a recycled walker restarts from (source->sink kinetics mode).
+        # Captured once, on the first spawn, and thereafter held fixed -- see
+        # `_recycling_basis_state` for why a frame index cannot carry this.
+        self._basis_state: dict[str, Any] | None = None
         self.occupancy_history = []
         self.bin_state = {}
         self.scaler = None
@@ -393,6 +399,149 @@ class TrailsMDCore:
             )
         return "xtc"
 
+    def _inherit_walker_states(self, parents: list[int], fallback: list) -> list:
+        """Build velocity-inheriting start states for the next iteration's walkers.
+
+        ``parents[i]`` is the current-iteration walker index that spawned walker
+        ``i`` (from the WE spawner). Each walker wrote its endpoint State beside its
+        trajectory as ``<traj>.endstate.npz``; we load positions/velocities/box from
+        the selected parents so the next segment continues the parent's dynamics.
+        Split children share a parent State and decorrelate through the Langevin
+        noise -- the standard weighted-ensemble split. Any walker whose endstate is
+        missing (e.g. it failed) falls back to its position-only start state, so a
+        single bad walker degrades to a fresh-velocity restart rather than aborting.
+        """
+        import numpy as np
+        from openmm import unit
+
+        iter_dir = self.outdir / f"iter_{self.iteration}"
+        suffix = self._traj_suffix()
+        states: list = []
+        for i, parent in enumerate(parents):
+            if parent < 0:
+                # Recycled walker: a NEW trajectory launched from the basis state, so
+                # it must draw fresh Maxwell-Boltzmann velocities rather than inherit
+                # a parent's. Inheriting here would continue the very trajectory that
+                # was just terminated at the target, breaking the steady state.
+                states.append(fallback[i])
+                continue
+            # `parent` indexes the LIVE ensemble, but endstate files are named by the
+            # RAW walker index. Those coincide only when nothing failed; after a drop
+            # they diverge, and the walker would silently inherit velocities from a
+            # different trajectory than its positions -- continuous-looking dynamics
+            # stitched from two different walkers.
+            live = getattr(self, "_live_walker_indices", None)
+            raw = live[parent] if live is not None and parent < len(live) else parent
+            endstate = iter_dir / f"iteration_{self.iteration}_{raw}.{suffix}.endstate.npz"
+            if not endstate.exists():
+                states.append(fallback[i])
+                continue
+            data = np.load(endstate)
+            states.append(
+                {
+                    "positions": data["positions"] * unit.nanometer,
+                    "velocities": data["velocities"] * (unit.nanometer / unit.picosecond),
+                    "box_vectors": data["box"] * unit.nanometer,
+                }
+            )
+        return states
+
+    def _recycling_basis_state(
+        self,
+        feature_extractor,
+        sampling_trajectories: list[str],
+        basis_index: int,
+        expected_cv: Any = None,
+        observed_cv: Any = None,
+    ) -> dict[str, Any]:
+        """Structure a recycled walker restarts from, captured once and held fixed.
+
+        A recycled walker is a new trajectory launched from the basis (source) state,
+        and its weight is booked as flux into the target. The spawner names it by
+        frame index -- but WE does not pool history, so an index only ever addresses
+        the CURRENT iteration's frames. At iteration N, `basis_index` therefore
+        resolves to wherever walker `basis_index` happens to be *now*, which is not
+        the basis. If that walker has drifted toward the target, the recycled walker
+        restarts next to the sink, re-enters almost immediately, and the flux -- hence
+        MFPT = 1/flux -- is biased fast. The index cannot carry this; only the
+        structure can.
+
+        Capturing on the first spawn matches `WESpawner.basis_cv`, which freezes on
+        its first call for exactly the same reason, so the CV a recycled walker is
+        binned at and the structure it actually restarts from are the same state.
+        Persisted to disk so a resumed run reloads the original basis instead of
+        re-capturing from a mid-run frame.
+        """
+        import numpy as np
+        from openmm import Vec3
+        from openmm.unit import nanometer
+
+        if self._basis_state is not None:
+            return self._basis_state
+
+        path = self.outdir / "recycling_basis_state.npz"
+        if path.exists():
+            data = np.load(path)
+            box = data["box"]
+            self._basis_state = {
+                "positions": data["positions"] * nanometer,
+                "box_vectors": (
+                    None
+                    if box.shape[0] == 0
+                    else tuple(Vec3(*row) * nanometer for row in box)
+                ),
+            }
+            return self._basis_state
+
+        # Fresh capture. The CV a recycled walker is BINNED at (the spawner's frozen
+        # `basis_cv`) and the structure it RESTARTS from (captured here) live in two
+        # separate persistence paths -- the spawner checkpoint and an .npz -- so
+        # nothing but this check keeps them describing the same state. On a fresh run
+        # they agree by construction. They disagree exactly when the spawner restored
+        # `basis_cv` from a checkpoint but the .npz is absent (an interrupted or
+        # hand-moved run dir): the structure would then be re-captured from a mid-run
+        # frame while the CV stayed original, reinstating the very drift this exists to
+        # prevent -- and doing it silently, since a plausible structure is still
+        # produced. Refuse rather than emit a biased rate.
+        if expected_cv is not None and observed_cv is not None:
+            expected_arr = np.asarray(expected_cv, dtype=float)
+            observed_arr = np.asarray(observed_cv, dtype=float)
+            if not np.allclose(expected_arr, observed_arr):
+                raise RuntimeError(
+                    "Recycling basis is inconsistent: the spawner is binning recycled "
+                    f"walkers at CV {expected_arr.tolist()}, but frame {basis_index} of "
+                    f"this iteration -- the frame the basis structure would be captured "
+                    f"from -- is at CV {observed_arr.tolist()}. This usually means the "
+                    "run resumed from a checkpoint while "
+                    f"'{path.name}' was missing, so the structure would come from a "
+                    "mid-run frame and the recycled walkers would restart somewhere "
+                    "other than the source, biasing MFPT = 1/flux. Restore that file "
+                    "from the original run directory, or start a fresh run."
+                )
+
+        state = feature_extractor.extract_positions_by_indices(
+            sampling_trajectories, [basis_index]
+        )[0]
+        box_vectors = state.get("box_vectors")
+        box_array = (
+            np.zeros((0, 3), dtype=float)
+            if box_vectors is None
+            else np.array(
+                [list(v.value_in_unit(nanometer)) for v in box_vectors], dtype=float
+            )
+        )
+        # np.savez appends ".npz" to a name that lacks it, which silently breaks an
+        # atomic rename onto `path`; write to a temp that already carries the suffix.
+        tmp = path.with_name(path.name + ".tmp.npz")
+        np.savez(
+            tmp,
+            positions=np.asarray(state["positions"].value_in_unit(nanometer), dtype=float),
+            box=box_array,
+        )
+        tmp.replace(path)
+        self._basis_state = state
+        return self._basis_state
+
     def run_iteration(self, walkers: list[Any]):
         """Run a single adaptive sampling iteration."""
 
@@ -406,6 +555,10 @@ class TrailsMDCore:
         }
         if engine_kwargs.get("seed") is None:
             engine_kwargs["seed"] = self.config.random_seed
+        # Kinetics mode: ask the engine to persist each walker's endpoint State so
+        # the next segment can inherit its velocities (continuous WE dynamics).
+        if getattr(self.config.spawning, "inherit_velocities", False):
+            engine_kwargs["save_endstate"] = True
         prepare_kwargs = {
             "conf": Path(self.config.system.conf_file),
             "top": Path(self.config.system.top_file),
@@ -451,10 +604,24 @@ class TrailsMDCore:
                 if missing
                 else ""
             )
+            hint = ""
+            if failed == n_walkers and self.iteration == 0:
+                # Every walker died on the very first iteration. Overwhelmingly the
+                # cause is an unrelaxed starting structure (steric clashes -> NaN),
+                # not a broken engine or GPU. Say so, instead of leaving the user with
+                # N identical OpenMM NaN tracebacks to interpret.
+                hint = (
+                    "\nHINT: all walkers failed on iteration 0. The most common cause is a "
+                    "starting structure that has not been energy-minimized/equilibrated "
+                    "(steric clashes integrate to NaN on the first steps). Minimize and "
+                    "equilibrate the structure before the campaign, set 'engine.equilibrate: "
+                    "true', or reduce 'engine.dt'. A NaN here is almost never a force-field "
+                    "or GPU fault."
+                )
             raise RuntimeError(
                 f"{failed}/{n_walkers} walker(s) failed during iteration "
                 f"{self.iteration} (min_success_fraction={min_fraction}); "
-                "stopping before CV extraction." + detail
+                "stopping before CV extraction." + detail + hint
             )
         other_start_time = time.time()
         if len(self.walker_parents) != len(walkers):
@@ -464,6 +631,12 @@ class TrailsMDCore:
         # failed ones (and their lineage parents) so downstream indexing stays
         # consistent. When every walker succeeds this is a no-op.
         ok_indices = [idx for idx, ok in enumerate(results) if ok]
+        # Publish the survivor mapping for spawners that carry per-walker state across
+        # iterations (weighted ensemble carries WEIGHTS). Walker i of the live ensemble
+        # is walker ok_indices[i] of the previous resampling; without that mapping a
+        # spawner can only guess, and a wrong guess re-attaches weights to the wrong
+        # trajectories while sum(w) == 1 still holds -- silent, and fatal to a rate.
+        self._live_walker_indices = list(ok_indices)
         if len(ok_indices) < n_walkers:
             logging.warning(
                 "Iteration %d: %d/%d walkers failed; continuing with %d survivors.",
@@ -605,22 +778,47 @@ class TrailsMDCore:
             self.spawner.cluster_model = getattr(
                 self.msm_estimator, "_cluster_model", None
             )
+        # Which of last iteration's walkers survived. A weighted-ensemble spawner
+        # cannot infer this from the frame count: failed walkers are dropped, so the
+        # frames it receives are the survivors' only, and guessing the ensemble size
+        # geometrically misaligns walker <-> weight <-> endpoint (see
+        # WESpawner._live_weights). `self._live_walker_indices` is set wherever the
+        # failed walkers are dropped, and indexes the PREVIOUS resampling's output.
+        if hasattr(self.spawner, "live_walker_indices"):
+            self.spawner.live_walker_indices = getattr(
+                self, "_live_walker_indices", None
+            )
+        # Spawners that only ever pick from the CURRENT walkers (weighted ensemble --
+        # a historical frame has no well-defined weight) must not be handed the
+        # history, and must not have it pooled for index mapping either: pooling costs
+        # one file-open per past iteration on every spawn step, so the per-iteration
+        # overhead grows without bound (measured: +0.8 s per iteration, 7.9 s at
+        # iteration 5 -> 11.1 s at iteration 9), which makes long kinetics runs
+        # impossible. Exploration spawners DO reach into history and keep the pooling.
+        uses_history = getattr(self.spawner, "uses_history", True)
         spawn_indices = self.spawner.sample(
-            points, self.config.spawning.walker, history=self.history
+            points,
+            self.config.spawning.walker,
+            history=self.history if uses_history else {},
         )
         # The spawner pooled historical frames matching the current projection
         # dimension; build the trajectory and frame-record lists over the *same*
         # iterations so each spawn index maps to the frame it was scored on.
         target_dim = projection_dim(points)
-        sampling_trajectories = self._sampling_trajectories(
-            trajectories, target_dim=target_dim
-        )
+        if uses_history:
+            sampling_trajectories = self._sampling_trajectories(
+                trajectories, target_dim=target_dim
+            )
+            sampling_frame_records = self._sampling_frame_records(
+                current_frame_records, target_dim=target_dim
+            )
+        else:
+            # Indices are already local to this iteration's frames.
+            sampling_trajectories = list(trajectories)
+            sampling_frame_records = current_frame_records
         self._validate_sampling_trajectories(
             sampling_trajectories,
             context=f"spawning iteration {self.iteration}",
-        )
-        sampling_frame_records = self._sampling_frame_records(
-            current_frame_records, target_dim=target_dim
         )
         next_walker_parents = [
             map_global_frame(sampling_frame_records, index)["key"]
@@ -629,6 +827,47 @@ class TrailsMDCore:
         next_walkers = feature_extractor.extract_positions_by_indices(
             sampling_trajectories, spawn_indices
         )
+        # Source->sink recycling: a recycled walker (parent -1) must restart from the
+        # BASIS structure. `spawn_indices` cannot express that -- see
+        # `_recycling_basis_state` -- so substitute the frozen basis here, before
+        # velocity inheritance, which already treats parent -1 as a fresh-velocity
+        # start and so needs only the right positions underneath it.
+        if getattr(self.config.spawning, "recycle_target", None) is not None:
+            # Capture on the FIRST spawn, whether or not anything recycled this
+            # iteration: the spawner freezes `basis_cv` on its first sample() call,
+            # and the CV and the structure must be captured from the same state.
+            # Deferring to the first recycling event would re-introduce the very
+            # drift this exists to prevent.
+            basis_index = int(
+                getattr(self.config.spawning, "recycle_basis_index", 0)
+            )
+            # Cross-check the structure against the CV the spawner froze; see
+            # `_recycling_basis_state`. `points` and `sampling_trajectories` index the
+            # same frames here (WE does not pool history), so points[basis_index] is
+            # the CV of the very frame the structure is taken from.
+            basis = self._recycling_basis_state(
+                feature_extractor,
+                sampling_trajectories,
+                basis_index,
+                expected_cv=getattr(self.spawner, "basis_cv", None),
+                observed_cv=(
+                    points[basis_index] if basis_index < len(points) else None
+                ),
+            )
+            parents = getattr(self.spawner, "selected_parents", None)
+            if parents is not None:
+                for i, parent in enumerate(parents):
+                    if parent < 0:
+                        next_walkers[i] = dict(basis)
+        # Kinetics mode: replace the position-only start states with full endpoint
+        # States (positions + velocities + box) of the parent walkers, so the next
+        # segment CONTINUES the dynamics instead of redrawing velocities. Only WE
+        # exposes `selected_parents` (current-iteration walker indices), and only
+        # there is velocity inheritance meaningful, so this is a no-op otherwise.
+        if getattr(self.config.spawning, "inherit_velocities", False):
+            parents = getattr(self.spawner, "selected_parents", None)
+            if parents is not None:
+                next_walkers = self._inherit_walker_states(parents, next_walkers)
 
         # Save the current projection and trajectory files after sampling; spawners
         # combine completed history with current points internally.
@@ -683,12 +922,31 @@ class TrailsMDCore:
                 cumulative_frames = 0
             bin_occupancy_str = f"{occupied_bins}/{total_bins}"
 
-            # Adaptive resolution check
-            self._update_resolution_and_convergence(occupied_bins)
-
         except Exception as e:
             bin_occupancy_str = "N/A"
-            logging.debug(f"Failed to compute bin occupancy: {e}")
+            # WARNING, not DEBUG: occupancy is a reported diagnostic, and at the
+            # default log level a DEBUG line is invisible.
+            logging.warning(
+                "Iteration %d: failed to compute bin occupancy: %s",
+                self.iteration,
+                e,
+            )
+
+        # Adaptive resolution + convergence. Deliberately OUTSIDE the occupancy
+        # try/except that used to enclose it: any exception raised while computing
+        # occupancy also disabled resolution bumps AND convergence detection for the
+        # remainder of the run, visible only as "bin_occupancy: N/A" plus a DEBUG
+        # line -- so a campaign could run to completion having silently never
+        # evaluated convergence. A failure here is worth surfacing on its own.
+        try:
+            self._update_resolution_and_convergence(occupied_bins)
+        except Exception as e:
+            logging.warning(
+                "Iteration %d: resolution/convergence update failed: %s. "
+                "Convergence was NOT evaluated for this iteration.",
+                self.iteration,
+                e,
+            )
 
         # MSM estimation + MSM-based convergence (opt-in).
         self._maybe_build_msm()
@@ -1293,6 +1551,8 @@ class TrailsMDCore:
             )
             return
 
+        lag_ok = self._msm_lag_is_assessable(trajs, msm_cfg.lagtime)
+
         try:
             result = self.msm_estimator.fit(trajs, iteration=current_iteration)
         except Exception as exc:  # noqa: BLE001 - MSM is diagnostic, never fatal
@@ -1307,9 +1567,55 @@ class TrailsMDCore:
 
         converged = self.msm_monitor.update(result)
         logging.info("MSM convergence %s", self.msm_monitor.status_line())
+        if converged and not lag_ok:
+            # The criteria are satisfied, but the implied-timescale plateau cannot be
+            # assessed within the available segment length -- do NOT certify (see
+            # _msm_lag_is_assessable). Convergence across iterations is not the same
+            # thing as convergence in lag time.
+            logging.warning(
+                "MSM criteria satisfied at iteration %d but convergence is NOT certified: "
+                "lagtime is too large a fraction of the walker segment length.",
+                current_iteration,
+            )
+            return
         if converged and not self.converged:
             self.converged = True
             self.convergence_reason = self.msm_monitor.reason
+
+    def _msm_lag_is_assessable(self, trajs: list[Any], lagtime: int) -> bool:
+        """Can an implied-timescale plateau actually be resolved with these segments?
+
+        Walkers spawn with velocities redrawn from a Maxwell-Boltzmann distribution, which
+        severs phase-space continuity at every parent-child boundary. Each walker segment is
+        therefore an independent trajectory and the MSM lag time is hard-capped by the segment
+        length ``L``: a transition cannot be counted at a lag longer than the trajectory that
+        carries it.
+
+        Markovianity additionally requires ``lagtime`` to exceed the momentum relaxation time,
+        so the usable window is ``1/gamma << lagtime <= L``. If ``lagtime`` approaches ``L``
+        there are too few lagged pairs per segment to see whether the implied timescales have
+        plateaued -- and the failure is silent: the convergence monitor watches the ITS across
+        *iterations*, so as data accumulate the estimate stops moving and looks converged even
+        when it is systematically underestimated.
+
+        We therefore require ``lagtime <= L/5`` before allowing the monitor to certify
+        convergence. Campaigns that need a longer lag should lengthen ``spawning.step`` (longer
+        walkers) so that ``L`` grows.
+        """
+        if not trajs:
+            return False
+        shortest = min(len(t) for t in trajs)
+        if lagtime * 5 <= shortest:
+            return True
+        logging.warning(
+            "MSM lagtime=%d is more than 1/5 of the shortest walker segment (%d frames). "
+            "The implied-timescale plateau cannot be assessed within a single segment, so "
+            "slow timescales may be systematically underestimated. Increase spawning.step "
+            "(longer walkers) or reduce msm.lagtime.",
+            lagtime,
+            shortest,
+        )
+        return False
 
     def _save_msm_result(self, iteration: int, result: Any) -> None:
         try:
