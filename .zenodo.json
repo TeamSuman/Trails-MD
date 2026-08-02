@@ -1,0 +1,38 @@
+{
+  "title": "TRAILS-MD: Mapping Complex Conformational Landscapes and Transition Pathways via Lightweight Lineage-Aware Adaptive Sampling",
+  "description": "<p>Trails-MD is a lightweight, engine-agnostic adaptive sampling framework that iteratively launches short trajectory ensembles across fixed or on-the-fly machine-learned collective-variable spaces. The MD engine, the sampling space, the spawning rule and the execution backend are all interchangeable behind a single configuration file.</p><p>Its defining feature is explicit parent-child trajectory lineage preservation, which allows continuous transition pathways to be reconstructed from highly parallelised, disjointed exploration stages, and cleanly separates basin discovery from genuine pathway connectivity. Two operating modes are kept distinct: an exploration mode for rapid conformational coverage, and a weighted-ensemble kinetics mode that yields an unbiased mean first passage time from the steady-state flux.</p>",
+  "upload_type": "software",
+  "license": "other-nc",
+  "access_right": "open",
+  "creators": [
+    {
+      "name": "Maity, Dibyendu",
+      "affiliation": "S. N. Bose National Centre for Basic Sciences, Kolkata, India"
+    },
+    {
+      "name": "Majumdar, Rupak",
+      "affiliation": "Max Planck Institute for Software Systems, Kaiserslautern, Germany"
+    },
+    {
+      "name": "Chakrabarty, Suman",
+      "affiliation": "S. N. Bose National Centre for Basic Sciences, Kolkata, India"
+    }
+  ],
+  "keywords": [
+    "molecular dynamics",
+    "adaptive sampling",
+    "enhanced sampling",
+    "collective variables",
+    "lineage-aware sampling",
+    "Markov state model",
+    "weighted ensemble",
+    "mean first passage time"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/TeamSuman/Trails-MD",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

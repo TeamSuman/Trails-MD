@@ -23,6 +23,7 @@ class DensitySpawner(Spawner):
         probabilistic: bool = True,
         target: list[float] | None = None,
         recent_window: int = 5,
+        history_window: int | None = None,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -33,6 +34,8 @@ class DensitySpawner(Spawner):
         self.probabilistic = probabilistic
         self.target = target
         self.recent_bins: deque[set[Any]] = deque(maxlen=recent_window)
+        # Bounds how far back the candidate pool reaches (None = full history).
+        self.history_window = history_window
         # Optional landscape-adaptive binner (set by the orchestrator); None -> grid.
         self.binner = None
 
@@ -40,7 +43,7 @@ class DensitySpawner(Spawner):
         self, points: np.ndarray, top_n: int, history: dict[int, Any] | None = None
     ) -> list[int]:
         points = np.asarray(points, dtype=float)
-        cumulative_points = _cumulative_points(points, history)
+        cumulative_points = _cumulative_points(points, history, self.history_window)
         if self.binner is not None:
             # Keep the adaptive binner in sync with resolution bumps.
             self.binner.n_bins = np.asarray(self.n_bins, dtype=int)
@@ -131,16 +134,20 @@ def _sample_frames(
 
 
 def _cumulative_points(
-    points: np.ndarray, history: dict[int, Any] | None
+    points: np.ndarray,
+    history: dict[int, Any] | None,
+    window: int | None = None,
 ) -> np.ndarray:
-    historical = _historical_points(points, history)
+    historical = _historical_points(points, history, window)
     if historical.size == 0:
         return points
     return np.vstack([historical, points])
 
 
 def _historical_points(
-    points: np.ndarray, history: dict[int, Any] | None
+    points: np.ndarray,
+    history: dict[int, Any] | None,
+    window: int | None = None,
 ) -> np.ndarray:
     empty = np.empty((0, points.shape[1]), dtype=float)
     if not history:
@@ -150,7 +157,7 @@ def _historical_points(
     # the candidate points here stay index-synchronized with the trajectory and
     # frame-record lists that core.py builds for the same spawn indices.
     projections = []
-    for iteration in pooled_history_iterations(history, points.shape[1]):
+    for iteration in pooled_history_iterations(history, points.shape[1], window):
         projection = np.asarray(history[iteration]["projection"], dtype=float)
         if projection.ndim == 1:
             projection = projection.reshape(-1, 1)

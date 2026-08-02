@@ -60,15 +60,51 @@ space_mode: tica
 adaptive_feature_type: distances      # distances | fitted_coords | phi_psi
 retrain_freq: 5                       # retrain the CV every 5 iterations
 adaptive_model:
-  lagtime: 5
+  lagtime: 5                          # in FRAMES: lag = lagtime x stride x dt
   latent_dim: 2
   epochs: 50
-  encoder_hidden_dims: [64, 32]
+  encoder_hidden_dims: [256, 128]     # also the built-in default
 ```
+
+`lagtime` is counted in **saved frames**, not in time units, so the physical lag is
+`lagtime × stride × dt`. With `stride: 100` and `dt: 0.002` ps, `lagtime: 5` is a 1 ps
+lag.
 
 When a model is retrained, the full accumulated feature history is
 reprojected into the updated latent space before spawning, so selection
 always reflects the current coordinates.
+
+### Time-lagged pairs never cross a respawn
+
+For every time-lagged method (TICA, TVAE, Deep-TICA, VAMPNets, SPIB) the features are
+split per walker before the lagged dataset is built, so a lagged pair is always drawn
+from one continuous walker segment. Velocities are redrawn at each respawn, so a pair
+spanning that boundary would relate dynamically unrelated configurations. This also
+means the lag must be shorter than a walker segment: `lagtime < step / stride`.
+
+Adaptive sampling still biases *which* segments exist, so the estimator sees a
+non-Boltzmann mixture of short trajectories. That affects the estimated timescales,
+not the validity of the pairs; see [Reweighting](reweighting.md).
+
+### The TVAE objective
+
+The time-lagged variational autoencoder encodes frame $\mathbf{x}_t$ and reconstructs
+$\mathbf{x}_{t+\tau}$, so the latent space is trained to retain slowly-decorrelating
+information rather than high-variance information. Its loss is
+
+$$
+\mathcal{L} = \underbrace{\lVert \mathbf{x}_{t+\tau} - \hat{\mathbf{x}}_{t+\tau} \rVert^2}_{\text{reconstruction}}
+\; + \; \frac{\beta}{n_\text{features}} \, D_\mathrm{KL}\!\left(q(\mathbf{z}\mid\mathbf{x}_t) \,\Vert\, p(\mathbf{z})\right)
+$$
+
+with $p(\mathbf{z}) = \mathcal{N}(0, I)$. Note the KL term is divided by the number of
+input features, so $\beta$ is defined **per feature**; the same $\beta$ therefore means
+the same thing across systems of different dimensionality.
+
+`adaptive_model.tvae_beta` sets $\beta$ and defaults to `1.0`, the standard VAE
+objective and the value used for every published Trails-MD result. Lowering it favours
+reconstruction accuracy; raising it favours a smoother, more strongly regularised latent
+space at the cost of reconstruction.
 
 ## Availability checks
 

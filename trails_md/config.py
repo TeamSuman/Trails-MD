@@ -80,6 +80,13 @@ class SpawningConfig(BaseModel):
     max_workers: int = 4
     target: list[float] | None = None
     recent_density_window: int = 5
+    # How far back the spawning candidate pool reaches. ``None`` (default) keeps the
+    # full accumulated history. ``0`` restricts spawning to the current iteration,
+    # reproducing the memoryless, cycle-local selection of PaCS-MD so the two can be
+    # compared under an otherwise identical loop. ``N`` keeps the N most recent
+    # iterations. Note this bounds *selection* only; coverage/convergence diagnostics
+    # continue to measure the whole campaign.
+    history_window: int | None = None
     voronoi_clusters: int = 150
     voronoi_periodic: bool = False
     voronoi_grid_size: int = 250
@@ -117,6 +124,11 @@ class AdaptiveModelConfig(BaseModel):
     decoder_hidden_dims: list[int] = [128, 256]
     dropout_rate: float = 0.1
     deep_tica_hidden_dims: list[int] = [256, 128]
+    # TVAE only: weight of the KL term in ``mse + tvae_beta * kld / n_features``.
+    # 1.0 reproduces every previously published Trails-MD result; values below 1
+    # relax the latent prior and favour reconstruction, values above it favour a
+    # smoother, more disentangled latent space at the cost of reconstruction.
+    tvae_beta: float = 1.0
     # SPIB (State Predictive Information Bottleneck) hyperparameters.
     spib_n_states: int = 10
     spib_beta: float = 1e-3
@@ -151,6 +163,13 @@ class AdaptiveModelConfig(BaseModel):
     def validate_dropout_rate(cls, value: float) -> float:
         if value < 0 or value >= 1:
             raise ValueError("dropout_rate must be >= 0 and < 1")
+        return value
+
+    @field_validator("tvae_beta", "spib_beta")
+    @classmethod
+    def validate_beta(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("beta must be greater than 0")
         return value
 
     @field_validator("encoder_hidden_dims", "decoder_hidden_dims", "deep_tica_hidden_dims")
