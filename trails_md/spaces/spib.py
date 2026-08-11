@@ -110,8 +110,13 @@ def train_spib(
     dropout: float = 0.0,
     device: str | None = None,
     seed: int = 42,
-) -> SPIBEncoder:
-    """Train SPIB and return the encoder (CPU, eval mode) for projection.
+    refine_rounds: int = 5,
+    refine_tol: float = 0.01,
+) -> tuple[SPIBEncoder, dict]:
+    """Train SPIB and return ``(encoder, info)``.
+
+    The encoder is returned on CPU in eval mode for projection; ``info`` records how
+    the self-consistent relabelling converged.
 
     Parameters
     ----------
@@ -121,9 +126,22 @@ def train_spib(
     lagtime:
         Prediction lag (in frames).
     n_states:
-        Number of discretised states the bottleneck predicts.
+        Number of states the bottleneck predicts *initially*. Refinement prunes
+        states that end up unoccupied, so the effective count adapts to the data --
+        this is how SPIB decides the number of metastable states rather than having
+        it imposed.
     beta:
         Information-bottleneck weight on the KL term.
+    refine_rounds:
+        Rounds of self-consistent relabelling. After each round every frame is
+        relabelled by the model's own predicted state and training resumes. This
+        loop is what makes the method *state predictive*: without it the CV is a
+        variational information bottleneck onto whatever partition k-means happened
+        to produce. ``0`` disables refinement and reproduces the earlier
+        fixed-label behaviour, for reproducing results generated before this
+        existed.
+    refine_tol:
+        Stop early once fewer than this fraction of frames change label in a round.
     """
     torch.manual_seed(seed)
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -133,47 +151,96 @@ def train_spib(
     labels_all = _state_labels(stacked, n_states, seed)
     n_states_eff = int(labels_all.max()) + 1
 
-    # Build time-lagged (x_t, label_{t+lag}) pairs within each trajectory.
-    offset = 0
-    xs: list[np.ndarray] = []
-    ys: list[np.ndarray] = []
-    for traj in traj_list:
-        length = len(traj)
-        if length > lagtime:
-            traj_labels = labels_all[offset : offset + length]
-            xs.append(np.asarray(traj[:-lagtime], dtype=np.float32))
-            ys.append(traj_labels[lagtime:])
-        offset += length
-    if not xs:
-        raise ValueError("SPIB: no trajectory longer than the lag time.")
+    def lagged_pairs(labels: np.ndarray):
+        """(x_t, label_{t+lag}) pairs formed strictly WITHIN each trajectory.
 
-    x = torch.from_numpy(np.vstack(xs)).to(device)
-    y = torch.from_numpy(np.concatenate(ys)).long().to(device)
+        Velocities are redrawn at every respawn, so a pair spanning two walker
+        segments would relate dynamically unrelated configurations.
+        """
+        offset = 0
+        xs: list[np.ndarray] = []
+        ys: list[np.ndarray] = []
+        keep: list[np.ndarray] = []      # index of x_t in the stacked array
+        for traj in traj_list:
+            length = len(traj)
+            if length > lagtime:
+                xs.append(np.asarray(traj[:-lagtime], dtype=np.float32))
+                ys.append(labels[offset + lagtime : offset + length])
+                keep.append(np.arange(offset, offset + length - lagtime))
+            offset += length
+        if not xs:
+            raise ValueError("SPIB: no trajectory longer than the lag time.")
+        return np.vstack(xs), np.concatenate(ys), np.concatenate(keep)
+
+    x_np, y_np, _ = lagged_pairs(labels_all)
+    x = torch.from_numpy(x_np).to(device)
+    x_all = torch.from_numpy(stacked).to(device)
 
     encoder = SPIBEncoder(input_size, latent_dim, hidden_dims, dropout).to(device)
-    predictor = SPIBPredictor(latent_dim, n_states_eff).to(device)
-    optim = torch.optim.Adam(
-        list(encoder.parameters()) + list(predictor.parameters()), lr=learning_rate
-    )
     ce = nn.CrossEntropyLoss()
-
-    n = x.shape[0]
-    batch_size = max(1, min(batch_size, n))
     generator = torch.Generator(device="cpu").manual_seed(seed)
-    encoder.train()
-    predictor.train()
-    for _ in range(epochs):
-        perm = torch.randperm(n, generator=generator).to(device)
-        for start in range(0, n, batch_size):
-            idx = perm[start : start + batch_size]
-            xb, yb = x[idx], y[idx]
-            mean, log_var = encoder(xb)
-            z = _reparameterise(mean, log_var)
-            logits = predictor(z)
-            loss = ce(logits, yb) + beta * _kl_to_standard_normal(mean, log_var)
-            optim.zero_grad()
-            loss.backward()
-            optim.step()
+    batch_size = max(1, min(batch_size, x.shape[0]))
+
+    def train_once(y_np_local: np.ndarray, n_out: int):
+        predictor = SPIBPredictor(latent_dim, n_out).to(device)
+        optim = torch.optim.Adam(
+            list(encoder.parameters()) + list(predictor.parameters()), lr=learning_rate
+        )
+        y_local = torch.from_numpy(y_np_local).long().to(device)
+        n = x.shape[0]
+        encoder.train()
+        predictor.train()
+        for _ in range(epochs):
+            perm = torch.randperm(n, generator=generator).to(device)
+            for start in range(0, n, batch_size):
+                idx = perm[start : start + batch_size]
+                mean, log_var = encoder(x[idx])
+                z = _reparameterise(mean, log_var)
+                loss = ce(predictor(z), y_local[idx]) + beta * _kl_to_standard_normal(
+                    mean, log_var
+                )
+                optim.zero_grad()
+                loss.backward()
+                optim.step()
+        return predictor
+
+    predictor = train_once(y_np, n_states_eff)
+
+    # --- self-consistent relabelling ------------------------------------------
+    # Relabel every frame by the model's own predicted state, drop states that end up
+    # unoccupied (this is how SPIB adapts the number of metastable states), and
+    # retrain. Repeat until the labelling stops moving. Skipping this loop leaves a
+    # variational information bottleneck onto a fixed k-means partition, which is a
+    # different method.
+    label_changes: list[float] = []
+    for _ in range(max(0, int(refine_rounds))):
+        encoder.eval()
+        predictor.eval()
+        with torch.no_grad():
+            mean_all, _ = encoder(x_all)
+            new_labels = predictor(mean_all).argmax(dim=1).cpu().numpy().astype(np.int64)
+        changed = float(np.mean(new_labels != labels_all))
+        label_changes.append(changed)
+
+        # Renumber to consecutive ids so unoccupied states disappear.
+        uniq, new_labels = np.unique(new_labels, return_inverse=True)
+        if len(uniq) < 2:
+            # Everything collapsed to one state: nothing left to predict, so stop
+            # rather than train a degenerate classifier.
+            labels_all = new_labels.astype(np.int64)
+            break
+        labels_all = new_labels.astype(np.int64)
+        n_states_eff = len(uniq)
+        _, y_np, _ = lagged_pairs(labels_all)
+        predictor = train_once(y_np, n_states_eff)
+        if changed < refine_tol:
+            break
 
     encoder.eval()
-    return encoder.to("cpu")
+    info = {
+        "label_changes": label_changes,
+        "n_states_initial": int(n_states),
+        "n_states_final": int(len(np.unique(labels_all))),
+        "refine_rounds_run": len(label_changes),
+    }
+    return encoder.to("cpu"), info

@@ -132,6 +132,9 @@ class AdaptiveModelConfig(BaseModel):
     # SPIB (State Predictive Information Bottleneck) hyperparameters.
     spib_n_states: int = 10
     spib_beta: float = 1e-3
+    # Rounds of self-consistent relabelling. This loop is what makes SPIB
+    # 'state predictive'; 0 reproduces the pre-1.1 fixed-k-means behaviour.
+    spib_refine_rounds: int = 5
 
     @field_validator("lagtime", "latent_dim", "epochs")
     @classmethod

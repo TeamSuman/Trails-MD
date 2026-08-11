@@ -34,6 +34,7 @@ class AdaptiveSpaceModel:
         "tvae_beta": 1.0,
         "spib_n_states": 10,
         "spib_beta": 1e-3,
+        "spib_refine_rounds": 5,
         "seed": 0,
     }
 
@@ -52,6 +53,7 @@ class AdaptiveSpaceModel:
         tvae_beta: float = 1.0,
         spib_n_states: int = 10,
         spib_beta: float = 1e-3,
+        spib_refine_rounds: int = 5,
         seed: int = 0,
         **_: Any,
     ):
@@ -71,6 +73,7 @@ class AdaptiveSpaceModel:
             raise ValueError(f"tvae_beta must be greater than 0; got {tvae_beta}")
         self.spib_n_states = int(spib_n_states)
         self.spib_beta = float(spib_beta)
+        self.spib_refine_rounds = int(spib_refine_rounds)
         self.scaler = TrajectoryScaler("minmax")
         self.model = None
         self.fitted = None  # PyTorch model used for projection
@@ -288,7 +291,7 @@ class AdaptiveSpaceModel:
                 scaled_features[i * walker_length : (i + 1) * walker_length]
                 for i in range(n_walkers)
             ]
-            self.fitted = train_spib(
+            self.fitted, self.spib_info = train_spib(
                 traj_list,
                 lagtime=self.lagtime,
                 latent_dim=self.latent_dim,
@@ -301,6 +304,16 @@ class AdaptiveSpaceModel:
                 dropout=self.dropout_rate,
                 device=self.device,
                 seed=self.seed,
+                refine_rounds=self.spib_refine_rounds,
+            )
+            import logging
+
+            logging.info(
+                "SPIB: %d refinement round(s), label churn %s, states %d -> %d",
+                self.spib_info["refine_rounds_run"],
+                [f"{c:.3f}" for c in self.spib_info["label_changes"]],
+                self.spib_info["n_states_initial"],
+                self.spib_info["n_states_final"],
             )
 
         elif self.type == "deep-lda":
