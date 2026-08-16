@@ -4,7 +4,7 @@ All notable changes to Trails-MD are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.1.0] — 2026-08-02
+## [1.1.0] — 2026-08-16
 
 Adds two features that were previously implicit or absent, and one new analysis
 module. No behaviour changes for existing configuration files: every new setting
@@ -26,6 +26,22 @@ defaults to what the code already did.
   dependency's source. The default remains `1.0`, so published results are unaffected,
   and checkpoints written before this release restore to `1.0` rather than to a new
   default. `docs/cv_methods.md` now writes the loss out in full.
+
+- **`adaptive_model.spib_refine_rounds`** — SPIB now performs the iterative
+  self-consistent state refinement the method is named for. After each pass the frames are
+  relabelled by the current latent classifier and the model is refit, stopping early once the
+  labels stop moving or after `spib_refine_rounds` passes (default `5`). Setting it to `0`
+  restores the single-pass projection shipped in 1.0.0.
+
+  **This changes SPIB results relative to 1.0.0 under the default**, and it is the one
+  behaviour change in this release that is not opt-in. The previous implementation produced a
+  projection whose discrete states were never refined against the representation they induced,
+  so its states were exploratory rather than converged; `docs/cv_methods.md` said as much. The
+  fitted model now also records how many rounds ran and how many labels changed in each, so the
+  refinement can be inspected rather than assumed. Note for reproducing the accompanying
+  manuscript: SPIB is not used there as a production sampling space, and the SPIB arm of its
+  ten-seed learned-coordinate benchmark was run before this change, i.e. with the single-pass
+  projection. To reproduce that number, set `spib_refine_rounds: 0`.
 
 - **`trails_md.analysis.riteweight`** — randomized iterative trajectory reweighting
   (Kania *et al.*, PNAS **123**, e2529246123, 2026) for recovering a stationary
@@ -52,7 +68,8 @@ defaults to what the code already did.
   `lagtime × stride × dt`), and an explicit statement that time-lagged pairs are built
   per walker and therefore never span a respawn.
 - `docs/configuration.md`: `history_window`, `tvae_beta`, `dropout_rate`, decoder
-  widths and the SPIB hyperparameters; plus a section on cumulative vs. cycle-local
+  widths, and the SPIB hyperparameters including `spib_refine_rounds`; plus a section on
+  cumulative vs. cycle-local
   selection and why the comparison must be made against aggregate simulation time
   rather than wall-clock time.
 - `docs/reweighting.md` (new): when to use MSM reweighting and when RiteWeight, how to

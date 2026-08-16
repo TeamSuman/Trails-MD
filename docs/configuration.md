@@ -117,7 +117,8 @@ learned modes:
 | `adaptive_model.encoder_hidden_dims` / `decoder_hidden_dims` | `[256,128]` / `[128,256]` | Network width. |
 | `adaptive_model.dropout_rate` | `0.1` | Dropout in the encoder/decoder. |
 | `adaptive_model.tvae_beta` | `1.0` | **TVAE only.** Weight of the KL term in `loss = mse + beta * kld / n_features`. `1.0` is the standard VAE objective and the value all published Trails-MD results used; `< 1` favours reconstruction, `> 1` favours a smoother latent space. |
-| `adaptive_model.spib_n_states` / `spib_beta` | `10` / `1e-3` | **SPIB only.** |
+| `adaptive_model.spib_n_states` / `spib_beta` | `10` / `1e-3` | **SPIB only.** Number of initial states for the discrete label assignment, and the information-bottleneck weight. |
+| `adaptive_model.spib_refine_rounds` | `5` | **SPIB only.** Maximum rounds of self-consistent relabelling: after each pass frames are relabelled by the current latent classifier and the model is refit, stopping early once the labels stop changing. `0` gives the single-pass behaviour of v1.0.0. |
 
 ## `execution`
 
