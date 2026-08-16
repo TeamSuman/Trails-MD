@@ -377,11 +377,21 @@ It's free to use for research, academic, educational, and other noncommercial
 purposes; commercial use requires a separate license from the copyright
 holder. See the [`LICENSE`](LICENSE) file for the full terms.
 
-<!-- ## How to cite
+## How to cite
 
-If you use Trails-MD in your research, please cite it. Citation metadata is in
-[`CITATION.cff`](CITATION.cff) (GitHub renders a "Cite this repository" button
-from it). A DOI and the accompanying publication will be added on release.
+If you use Trails-MD in your research, please cite the archived release:
 
-Unhide this section once the accompanying paper is published. -->
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21969351.svg)](https://doi.org/10.5281/zenodo.21969351)
+
+- **Concept DOI** (always the latest release): [10.5281/zenodo.21969351](https://doi.org/10.5281/zenodo.21969351)
+- **This release, v1.1.0**: [10.5281/zenodo.21969352](https://doi.org/10.5281/zenodo.21969352)
+
+Cite the version DOI when reproducibility matters, since behaviour can change between
+releases — v1.1.0, for instance, turns on SPIB state refinement by default.
+
+Machine-readable metadata is in [`CITATION.cff`](CITATION.cff); GitHub renders a
+"Cite this repository" button from it.
+
+The accompanying paper is under review at *The Journal of Chemical Physics*; its
+citation will be added here once it is published.
 
