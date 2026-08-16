@@ -4,6 +4,62 @@ All notable changes to Trails-MD are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-08-02
+
+Adds two features that were previously implicit or absent, and one new analysis
+module. No behaviour changes for existing configuration files: every new setting
+defaults to what the code already did.
+
+### Added
+
+- **`spawning.history_window`** — controls how much of the campaign a spawner scores
+  against. The default (`null`) is unchanged: the whole history. Setting it to a small
+  integer gives PaCS-MD-style cycle-local selection, and `0` scores only the current
+  iteration. This exists because a *coverage* objective is only definable over
+  cumulative history, and the setting makes that claim testable under an otherwise
+  identical loop. See `docs/configuration.md`.
+
+- **`adaptive_model.tvae_beta`** — the KL weight in the TVAE objective,
+  `loss = mse + beta * kld / n_features`. Previously the estimator was constructed
+  without this argument, so every run silently used deeptime's default of `1.0` and no
+  user could change it; answering "which beta did you use?" required reading a
+  dependency's source. The default remains `1.0`, so published results are unaffected,
+  and checkpoints written before this release restore to `1.0` rather than to a new
+  default. `docs/cv_methods.md` now writes the loss out in full.
+
+- **`trails_md.analysis.riteweight`** — randomized iterative trajectory reweighting
+  (Kania *et al.*, PNAS **123**, e2529246123, 2026) for recovering a stationary
+  distribution from adaptively-sampled data **without a lag time and without assuming
+  cluster-level Markovianity**, complementing the existing MSM route. Independent
+  implementation from the published algorithm; the authors' reference code carries no
+  licence statement and was deliberately not copied. New page: `docs/reweighting.md`.
+
+### Fixed
+
+- **The shipped template disagreed with the code defaults.** `templates.py` advertised
+  `encoder_hidden_dims: [64, 32]` / `decoder_hidden_dims: [32, 64]` /
+  `deep_tica_hidden_dims: [64, 32]` while the built-in defaults are `[256, 128]` /
+  `[128, 256]` / `[256, 128]`, so a user who copied the template trained a different
+  network from one who omitted the block. The template now states the real defaults.
+
+- `trails_md.analysis` did not export anything but `data`, so `riteweight` was
+  importable only by full module path.
+
+### Documentation
+
+- `docs/cv_methods.md`: the TVAE loss in full, `beta` and its per-feature
+  normalisation, that `lagtime` is counted in **frames** (physical lag =
+  `lagtime × stride × dt`), and an explicit statement that time-lagged pairs are built
+  per walker and therefore never span a respawn.
+- `docs/configuration.md`: `history_window`, `tvae_beta`, `dropout_rate`, decoder
+  widths and the SPIB hyperparameters; plus a section on cumulative vs. cycle-local
+  selection and why the comparison must be made against aggregate simulation time
+  rather than wall-clock time.
+- `docs/reweighting.md` (new): when to use MSM reweighting and when RiteWeight, how to
+  build segment pairs without crossing a respawn, and the limitation both share —
+  neither can fix mis-*coverage*.
+- `.zenodo.json` added so the archived release carries proper metadata.
+
 ## [1.0.0] — 2026-07-23
 
 **First public release.** It brings a coverage-driven adaptive sampler up to an

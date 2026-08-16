@@ -53,6 +53,7 @@ at startup. Below, only non-obvious defaults are noted — see
 | `target` | — | CV-space target `[x, y, …]` when `search_mode: target`. |
 | `recent_density_window` | `5` | Bins sampled in the last N iterations are down-weighted (`density`). |
 | `lof_neighbors` | `20` | Neighbours for the LOF spawner. |
+| `history_window` | `None` | How many past iterations the spawner scores over. `None` (default) uses the entire campaign; an integer `k` keeps only the last `k` iterations, and `0` scores the current iteration alone. See [cumulative vs. cycle-local selection](#cumulative-vs-cycle-local-selection). |
 | `voronoi_periodic` | `false` | Wrap Voronoi cells periodically. |
 | `voronoi_grid_size` | `250` | Grid resolution for Voronoi cell-area estimation. |
 | `voronoi_max_clusters` | `5000` | Upper bound on auto-grown Voronoi cells. |
@@ -68,6 +69,32 @@ at startup. Below, only non-obvious defaults are noted — see
     `execution.walker_timeout` (seconds) kills a walker that runs longer than the
     limit and marks the batch failed — a guard against a hung in-process OpenMM
     walker. Off by default.
+
+### Cumulative vs. cycle-local selection
+
+By default a spawner ranks candidate frames against **every frame the campaign has
+ever produced**. This is deliberate, and it is the main structural difference from
+the PaCS-MD family, whose selection rules rank only the frames of the current cycle.
+
+The distinction matters because a *coverage* objective is only definable over
+cumulative history: "which regions are under-sampled?" is meaningless if the only
+frames in view are the ones just generated. Cycle-local schemes therefore use
+frontier or extremum objectives (furthest from the start, closest to a target, most
+outlying) rather than coverage.
+
+`history_window` exposes the choice so the two can be compared under an otherwise
+identical loop:
+
+```yaml
+spawning:
+  history_window: null   # default: score against the whole campaign
+  # history_window: 0    # score only the current iteration (cycle-local)
+  # history_window: 5    # sliding window of the last five iterations
+```
+
+Cycle-local selection is slightly cheaper per iteration because the candidate pool is
+smaller, so comparisons between settings should be made against **aggregate
+simulation time, not wall-clock time**.
 
 ## `space_mode` and adaptive model
 
@@ -87,7 +114,10 @@ learned modes:
 | `adaptive_model.lagtime` | `5` | Lag time for time-lagged CVs. |
 | `adaptive_model.latent_dim` | `2` | CV dimensionality. |
 | `adaptive_model.epochs` / `learning_rate` | `50` / `5e-4` | Training. |
-| `adaptive_model.encoder_hidden_dims` | `[256,128]` | Network width. |
+| `adaptive_model.encoder_hidden_dims` / `decoder_hidden_dims` | `[256,128]` / `[128,256]` | Network width. |
+| `adaptive_model.dropout_rate` | `0.1` | Dropout in the encoder/decoder. |
+| `adaptive_model.tvae_beta` | `1.0` | **TVAE only.** Weight of the KL term in `loss = mse + beta * kld / n_features`. `1.0` is the standard VAE objective and the value all published Trails-MD results used; `< 1` favours reconstruction, `> 1` favours a smoother latent space. |
+| `adaptive_model.spib_n_states` / `spib_beta` | `10` / `1e-3` | **SPIB only.** |
 
 ## `execution`
 

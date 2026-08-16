@@ -40,7 +40,9 @@ nav:
       - Execution (workstation & HPC): execution.md
       - HPC scaling & WESTPA comparison: hpc_scaling.md
       - Performance & GPU utilization: performance.md
-  - Analysis: analysis.md
+  - Analysis:
+      - MSM analysis & plotting: analysis.md
+      - Reweighting an adaptive ensemble: reweighting.md
   - Reference:
       - CLI reference: cli.md
       - Python API: api.md

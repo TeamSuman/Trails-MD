@@ -60,6 +60,11 @@ spawning:
   voronoi_clusters: 150         # cells / microstates (voronoi & msm spawners)
   we_target_per_bin: 4          # walkers per bin for spawn_scheme: we
   lof_neighbors: 20
+  # history_window: null        # iterations of history the spawner scores over.
+                                # null (default) = the whole campaign, which is what
+                                # makes a coverage objective definable at all. Set to
+                                # a small integer for PaCS-MD-style cycle-local
+                                # selection; 0 scores only the current iteration.
   # ---- Kinetics mode (rate / MFPT): spawn_scheme: we + md_engine: openmm --------
   # inherit_velocities: true                   # continue parent velocities (required for a rate)
   # recycle_target: [[-2.5, -1.0], [2.0, 3.0]] # source->sink sink box, one [lo, hi] per CV dim
@@ -84,14 +89,17 @@ aggregate_memory: true
 max_adaptive_memory_frames: 50000
 
 adaptive_model:                         # hyperparameters for learned CVs
-  lagtime: 5
+  lagtime: 5                            # in FRAMES, so lag time = lagtime x stride x dt
   latent_dim: 2
   epochs: 50
   learning_rate: 0.0005
-  encoder_hidden_dims: [64, 32]
-  decoder_hidden_dims: [32, 64]
+  # These are also the built-in defaults, so a config that omits the whole
+  # adaptive_model block trains exactly the network described here.
+  encoder_hidden_dims: [256, 128]
+  decoder_hidden_dims: [128, 256]
   dropout_rate: 0.1
-  deep_tica_hidden_dims: [64, 32]
+  deep_tica_hidden_dims: [256, 128]
+  tvae_beta: 1.0                        # TVAE only: KL weight in mse + beta*kld/n_features
   spib_n_states: 10                     # SPIB only
   spib_beta: 0.001                      # SPIB only
 

@@ -78,6 +78,7 @@ class TrailsMDCore:
             probabilistic=self.config.spawning.spawn_type != "hard",
             target=self.config.spawning.target,
             recent_window=self.config.spawning.recent_density_window,
+            history_window=self._history_window(),
             n_clusters=self.config.spawning.voronoi_clusters,
             periodic=self.config.spawning.voronoi_periodic,
             grid_size=self.config.spawning.voronoi_grid_size,
@@ -1004,6 +1005,15 @@ class TrailsMDCore:
             "convergence_reason": self.convergence_reason,
         }
 
+    def _history_window(self) -> int | None:
+        """Configured spawning history window (None = full cumulative history).
+
+        Read through one accessor because the spawner's candidate pool and the
+        trajectory/frame-record mapping must agree exactly; if they used different
+        windows a spawn index would resolve to the wrong conformation silently.
+        """
+        return getattr(self.config.spawning, "history_window", None)
+
     def _sampling_trajectories(
         self, current_trajectories: list[str], target_dim: int | None = None
     ) -> list[str]:
@@ -1011,7 +1021,9 @@ class TrailsMDCore:
         # (via pooled_history_iterations), so a spawn index maps to the intended
         # trajectory even when history mixes projection dimensionalities.
         trajectories: list[str] = []
-        for iteration in pooled_history_iterations(self.history, target_dim):
+        for iteration in pooled_history_iterations(
+            self.history, target_dim, self._history_window()
+        ):
             entry = self.history[iteration]
             stored = entry.get("trajectories")
             if stored:
@@ -1029,7 +1041,9 @@ class TrailsMDCore:
         target_dim: int | None = None,
     ) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
-        for iteration in pooled_history_iterations(self.history, target_dim):
+        for iteration in pooled_history_iterations(
+            self.history, target_dim, self._history_window()
+        ):
             entry = self.history[iteration]
             stored = entry.get("frames")
             if stored:

@@ -27,8 +27,14 @@ class AdaptiveSpaceModel:
         "decoder_hidden_dims": [128, 256],
         "dropout_rate": 0.1,
         "deep_tica_hidden_dims": [256, 128],
+        # 1.0 is deeptime's default and is what every Trails-MD result published
+        # before this parameter existed was produced with. Keeping it here means a
+        # checkpoint written before ``tvae_beta`` was introduced restores to the
+        # behaviour it actually had, rather than to a new default.
+        "tvae_beta": 1.0,
         "spib_n_states": 10,
         "spib_beta": 1e-3,
+        "spib_refine_rounds": 5,
         "seed": 0,
     }
 
@@ -44,8 +50,10 @@ class AdaptiveSpaceModel:
         decoder_hidden_dims: list[int] | None = None,
         dropout_rate: float = 0.1,
         deep_tica_hidden_dims: list[int] | None = None,
+        tvae_beta: float = 1.0,
         spib_n_states: int = 10,
         spib_beta: float = 1e-3,
+        spib_refine_rounds: int = 5,
         seed: int = 0,
         **_: Any,
     ):
@@ -60,8 +68,12 @@ class AdaptiveSpaceModel:
         self.decoder_hidden_dims = list(decoder_hidden_dims or [128, 256])
         self.dropout_rate = float(dropout_rate)
         self.deep_tica_hidden_dims = list(deep_tica_hidden_dims or [256, 128])
+        self.tvae_beta = float(tvae_beta)
+        if self.tvae_beta <= 0:
+            raise ValueError(f"tvae_beta must be greater than 0; got {tvae_beta}")
         self.spib_n_states = int(spib_n_states)
         self.spib_beta = float(spib_beta)
+        self.spib_refine_rounds = int(spib_refine_rounds)
         self.scaler = TrajectoryScaler("minmax")
         self.model = None
         self.fitted = None  # PyTorch model used for projection
@@ -157,7 +169,13 @@ class AdaptiveSpaceModel:
                 hidden_dims=self.decoder_hidden_dims,
                 dropout_rate=self.dropout_rate,
             ).to(self.device)
-            self.model = TVAE(encoder, decoder, learning_rate=self.learning_rate)
+            # beta weights the KL term: loss = mse + beta * kld / n_features.
+            self.model = TVAE(
+                encoder,
+                decoder,
+                learning_rate=self.learning_rate,
+                beta=self.tvae_beta,
+            )
 
             # Prepare data
             dataset = TrajectoryDataset.from_trajectories(self.lagtime, traj_list)
@@ -273,7 +291,7 @@ class AdaptiveSpaceModel:
                 scaled_features[i * walker_length : (i + 1) * walker_length]
                 for i in range(n_walkers)
             ]
-            self.fitted = train_spib(
+            self.fitted, self.spib_info = train_spib(
                 traj_list,
                 lagtime=self.lagtime,
                 latent_dim=self.latent_dim,
@@ -286,6 +304,16 @@ class AdaptiveSpaceModel:
                 dropout=self.dropout_rate,
                 device=self.device,
                 seed=self.seed,
+                refine_rounds=self.spib_refine_rounds,
+            )
+            import logging
+
+            logging.info(
+                "SPIB: %d refinement round(s), label churn %s, states %d -> %d",
+                self.spib_info["refine_rounds_run"],
+                [f"{c:.3f}" for c in self.spib_info["label_changes"]],
+                self.spib_info["n_states_initial"],
+                self.spib_info["n_states_final"],
             )
 
         elif self.type == "deep-lda":
