@@ -27,10 +27,14 @@ variance (PCA), slow modes (TICA, Deep-TICA, VAMPnet), time-lagged reconstructio
 | `spib`        | State predictive information bottleneck | predictive information | torch |
 | `deep-lda`    | Deep LDA (supervised)          | endpoint discrimination | mlcolvar + lightning |
 
-!!! note "One caveat worth knowing"
-    `spib` runs a **single-pass** information-bottleneck projection; it does *not*
-    perform the iterative self-consistent state refinement of the original method.
-    Treat its states as exploratory rather than converged metastable assignments.
+!!! note "SPIB state refinement"
+    Since v1.1.0 `spib` performs the iterative self-consistent state refinement of the
+    original method: after each pass the frames are relabelled by the current latent
+    classifier and the model is refit, repeating until the labels stop moving or
+    `adaptive_model.spib_refine_rounds` is exhausted (default `5`). Set it to `0` to
+    recover the earlier single-pass behaviour, in which the states were exploratory
+    rather than converged metastable assignments. The number of rounds actually run,
+    and the label churn per round, are recorded with the fitted model.
 
 `deep-tica` and `deep-lda` need the optional extra:
 `pip install "trails-md[deep-tica]"`. `deep-lda` additionally requires per-frame
